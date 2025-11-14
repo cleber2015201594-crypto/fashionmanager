@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from datetime import datetime, date, timedelta
 import json
 import os
@@ -64,16 +62,6 @@ st.markdown("""
         transform: translateY(-5px);
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
     }
-    .premium-badge {
-        background: linear-gradient(45deg, #FFD700, #FFEC8B);
-        color: #8B4513;
-        padding: 8px 20px;
-        border-radius: 25px;
-        font-weight: bold;
-        font-size: 0.9rem;
-        display: inline-block;
-        margin: 5px;
-    }
     .status-pendente { 
         background-color: #FFF3CD; 
         color: #856404; 
@@ -109,14 +97,6 @@ st.markdown("""
         border-radius: 20px;
         margin: 10px 0;
         box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-    }
-    .user-chat-bubble {
-        background: #f1f5f9;
-        color: #334155;
-        padding: 15px 20px;
-        border-radius: 20px;
-        margin: 10px 0;
-        border: 1px solid #e2e8f0;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -165,7 +145,7 @@ PLANOS = {
 }
 
 # =========================================
-# 🔐 SISTEMA DE AUTENTICAÇÃO AVANÇADO
+# 🔐 SISTEMA DE AUTENTICAÇÃO
 # =========================================
 
 def make_hashes(password):
@@ -212,19 +192,6 @@ def init_db():
                 )
             ''')
             
-            # Tabela de escolas
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS escolas (
-                    id SERIAL PRIMARY KEY,
-                    fabrica_id INTEGER REFERENCES fabricas(id),
-                    nome VARCHAR(100) NOT NULL,
-                    endereco TEXT,
-                    telefone VARCHAR(20),
-                    ativa BOOLEAN DEFAULT TRUE,
-                    UNIQUE(fabrica_id, nome)
-                )
-            ''')
-            
             # Tabela de clientes (CRM)
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS clientes (
@@ -239,16 +206,6 @@ def init_db():
                     data_cadastro DATE DEFAULT CURRENT_DATE,
                     tipo_cliente VARCHAR(20) DEFAULT 'regular',
                     indicacoes INTEGER DEFAULT 0
-                )
-            ''')
-            
-            # Tabela de relação cliente-escola
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS cliente_escolas (
-                    id SERIAL PRIMARY KEY,
-                    cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
-                    escola_id INTEGER REFERENCES escolas(id) ON DELETE CASCADE,
-                    UNIQUE(cliente_id, escola_id)
                 )
             ''')
             
@@ -306,20 +263,6 @@ def init_db():
                     preco_unitario DECIMAL(10,2),
                     custo_unitario DECIMAL(10,2),
                     subtotal DECIMAL(10,2),
-                    observacoes TEXT
-                )
-            ''')
-            
-            # Tabela de fluxo de produção
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS producao_etapas (
-                    id SERIAL PRIMARY KEY,
-                    pedido_id INTEGER REFERENCES pedidos(id),
-                    etapa VARCHAR(100),
-                    responsavel VARCHAR(100),
-                    status VARCHAR(50) DEFAULT 'Pendente',
-                    data_inicio TIMESTAMP,
-                    data_conclusao TIMESTAMP,
                     observacoes TEXT
                 )
             ''')
@@ -398,44 +341,15 @@ def get_connection():
         return None
 
 # =========================================
-# 🤖 SISTEMA DE IA SIMPLIFICADO (Compatível)
+# 🤖 SISTEMA DE INSIGHTS SIMPLES
 # =========================================
 
-class FactoryPilotAI:
+class FactoryPilotAssistant:
     def __init__(self):
-        self.models_loaded = False
+        pass
     
-    def initialize_models(self):
-        """Simulação - IA desativada para compatibilidade"""
-        return False
-    
-    def analisar_sentimento_texto(self, texto):
-        """Simulação básica de análise de sentimento"""
-        palavras_positivas = ['bom', 'ótimo', 'excelente', 'gostei', 'perfeito']
-        palavras_negativas = ['ruim', 'péssimo', 'horrível', 'odeio', 'problema']
-        
-        texto_lower = texto.lower()
-        positivas = sum(1 for palavra in palavras_positivas if palavra in texto_lower)
-        negativas = sum(1 for palavra in palavras_negativas if palavra in texto_lower)
-        
-        if positivas > negativas:
-            return {'sentimento': 'POSITIVO', 'confianca': 0.7}
-        elif negativas > positivas:
-            return {'sentimento': 'NEGATIVO', 'confianca': 0.7}
-        else:
-            return {'sentimento': 'NEUTRO', 'confianca': 0.5}
-    
-    def prever_vendas_proximos_30_dias(self, fabrica_id):
-        """Previsão simulada sem machine learning"""
-        return {
-            'previsao': [1000] * 30,
-            'confianca': 0.6,
-            'tendencia': 'estavel',
-            'observacao': '📊 Modo demo - Use dados reais para previsões precisas'
-        }
-    
-    def gerar_insights_inteligentes(self, fabrica_id):
-        """Insights simulados baseados em dados básicos"""
+    def gerar_insights(self, fabrica_id):
+        """Gera insights básicos baseados nos dados"""
         insights = []
         
         try:
@@ -460,13 +374,6 @@ class FactoryPilotAI:
             if produtos_baixo_estoque:
                 insights.append(f"⚠️ **{len(produtos_baixo_estoque)} produtos** com estoque baixo")
             
-            # Insight 4: Pedidos pendentes
-            pedidos = listar_pedidos_por_fabrica(fabrica_id)
-            if pedidos:
-                pedidos_pendentes = [p for p in pedidos if p[3] in ['Orçamento', 'Produção']]
-                if pedidos_pendentes:
-                    insights.append(f"📦 **{len(pedidos_pendentes)} pedidos** em andamento")
-            
         except Exception as e:
             insights.append("🔧 Sistema em modo de demonstração")
         
@@ -474,68 +381,25 @@ class FactoryPilotAI:
         if not insights:
             insights = [
                 "💡 **Dica:** Cadastre mais produtos para insights precisos",
-                "📊 **Sugestão:** Use o sistema por 1 semana para dados reais",
+                "📊 **Sugestão:** Use o sistema por 1 semana para dados reais", 
                 "🎯 **Recomendação:** Foque nos clientes que mais compram"
             ]
         
         return insights
-
-# Instância global da IA
-factory_ai = FactoryPilotAI()
-
-# =========================================
-# 🎯 SISTEMA DE NOTIFICAÇÕES INTELIGENTES
-# =========================================
-
-def criar_notificacao(fabrica_id, usuario_id, tipo, titulo, mensagem, link=None):
-    """Cria uma notificação para o usuário"""
-    conn = get_connection()
-    if not conn:
-        return False
     
-    try:
-        cur = conn.cursor()
-        cur.execute('''
-            INSERT INTO notificacoes (fabrica_id, usuario_id, tipo, titulo, mensagem, link)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (fabrica_id, usuario_id, tipo, titulo, mensagem, link))
-        conn.commit()
-        return True
-    except Exception as e:
-        return False
-    finally:
-        conn.close()
+    def prever_vendas(self, fabrica_id):
+        """Previsão simulada de vendas"""
+        return {
+            'previsao': [1000] * 30,
+            'tendencia': 'estavel',
+            'observacao': '📊 Use dados reais para previsões precisas'
+        }
 
-def obter_notificacoes(usuario_id, nao_lidas=True):
-    """Obtém notificações do usuário"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cur = conn.cursor()
-        if nao_lidas:
-            cur.execute('''
-                SELECT * FROM notificacoes 
-                WHERE usuario_id = %s AND lida = FALSE
-                ORDER BY data_criacao DESC
-                LIMIT 10
-            ''', (usuario_id,))
-        else:
-            cur.execute('''
-                SELECT * FROM notificacoes 
-                WHERE usuario_id = %s
-                ORDER BY data_criacao DESC
-                LIMIT 20
-            ''', (usuario_id,))
-        return cur.fetchall()
-    except Exception as e:
-        return []
-    finally:
-        conn.close()
+# Instância global do assistente
+assistant = FactoryPilotAssistant()
 
 # =========================================
-# 🎨 INTERFACE PREMIUM - FACTORYPILOT
+# 🎨 INTERFACE PRINCIPAL
 # =========================================
 
 def mostrar_header():
@@ -548,8 +412,8 @@ def mostrar_header():
     
     st.markdown("---")
 
-def mostrar_dashboard_premium():
-    """Dashboard executivo premium com IA"""
+def mostrar_dashboard():
+    """Dashboard principal"""
     
     if 'fabrica_id' not in st.session_state:
         st.error("Erro: Fábrica não identificada")
@@ -590,7 +454,7 @@ def mostrar_dashboard_premium():
             <h2>{metricas.get('clientes_ativos', 0)}</h2>
             <p>Últimos 90 dias</p>
         </div>
-        ""', unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
     
     with col4:
         st.markdown(f"""
@@ -601,71 +465,29 @@ def mostrar_dashboard_premium():
         </div>
         """, unsafe_allow_html=True)
     
-    # Seção IA - Assistente Inteligente
-    st.markdown("## 🤖 Assistente FactoryPilot")
+    # Seção de Insights
+    st.markdown("## 💡 Insights do Sistema")
     
     col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("""
         <div class="ai-chat-bubble">
-        🧠 **Assistente:** Olá! Sou seu assistente inteligente. 
-        Posso ajudar a analisar seus dados e dar insights valiosos 
-        para o seu negócio. O que gostaria de saber?
+        🧠 **Assistente:** Olá! Estou aqui para ajudar a analisar seus dados 
+        e identificar oportunidades para seu negócio.
         </div>
         """, unsafe_allow_html=True)
         
-        pergunta = st.text_input("💬 Faça uma pergunta sobre seu negócio:", 
-                               placeholder="Ex: Como aumentar minhas vendas? Quais meus melhores produtos?")
-        
-        if pergunta:
-            if "aumentar" in pergunta.lower() and "venda" in pergunta.lower():
-                produtos = listar_produtos_por_fabrica(fabrica_id)
-                if produtos:
-                    produtos_com_margem = [p for p in produtos if p[8] is not None]
-                    if produtos_com_margem:
-                        melhor_margem = max(produtos_com_margem, key=lambda x: x[8])
-                        st.markdown(f"""
-                        <div class="ai-chat-bubble">
-                        💡 **Recomendação:** Para aumentar vendas, foque em **{melhor_margem[2]}** 
-                        que tem a melhor margem (R$ {melhor_margem[8]:.2f}). Considere promoções 
-                        ou pacotes com este produto.
-                        </div>
-                        """, unsafe_allow_html=True)
-            
-            elif "melhor" in pergunta.lower() and "cliente" in pergunta.lower():
-                clientes = listar_clientes_completos_por_fabrica(fabrica_id)
-                if clientes:
-                    clientes_com_gasto = [c for c in clientes if c[11] is not None and c[11] > 0]
-                    if clientes_com_gasto:
-                        cliente_top = max(clientes_com_gasto, key=lambda x: x[11])
-                        st.markdown(f"""
-                        <div class="ai-chat-bubble">
-                        🏆 **Insight:** Seu cliente mais valioso é **{cliente_top[1]}** 
-                        com R$ {cliente_top[11]:.2f} em compras. Recomendo um programa 
-                        de fidelidade para este cliente.
-                        </div>
-                        """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="ai-chat-bubble">
-                🤖 **Assistente:** Estou aqui para ajudar! Com mais dados de uso, 
-                poderei dar insights mais precisos sobre seu negócio.
-                </div>
-                """, unsafe_allow_html=True)
-    
-    with col2:
         # Insights automáticos
-        st.markdown("### 💡 Insights Automáticos")
-        insights = factory_ai.gerar_insights_inteligentes(fabrica_id)
-        
+        insights = assistant.gerar_insights(fabrica_id)
         for insight in insights[:3]:
             st.info(insight)
-        
-        # Previsão de vendas
+    
+    with col2:
         st.markdown("### 📈 Previsão")
-        previsao = factory_ai.prever_vendas_proximos_30_dias(fabrica_id)
+        previsao = assistant.prever_vendas(fabrica_id)
         st.metric("Próximos 30 dias", f"R$ {sum(previsao['previsao'])/30:.0f}/dia")
+        st.caption(previsao['observacao'])
     
     # Gráficos
     st.markdown("## 📈 Analytics em Tempo Real")
@@ -678,16 +500,6 @@ def mostrar_dashboard_premium():
         if not dados_vendas.empty:
             fig = px.line(dados_vendas, x='data', y='faturamento', 
                          title="Faturamento Diário - Últimos 30 Dias", markers=True)
-            fig.update_layout(height=300, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            # Gráfico demo
-            dados_demo = pd.DataFrame({
-                'data': pd.date_range(start='2024-01-01', periods=30, freq='D'),
-                'faturamento': np.random.normal(1000, 200, 30).cumsum()
-            })
-            fig = px.line(dados_demo, x='data', y='faturamento', 
-                         title="Faturamento Diário - Demo", markers=True)
             fig.update_layout(height=300, showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
     
@@ -705,15 +517,8 @@ def mostrar_dashboard_premium():
                             title="Pedidos por Status", hole=0.4)
                 fig.update_layout(height=300)
                 st.plotly_chart(fig, use_container_width=True)
-        else:
-            # Gráfico demo
-            status_demo = {'Orçamento': 5, 'Produção': 8, 'Entregue': 12, 'Cancelado': 1}
-            fig = px.pie(values=list(status_demo.values()), names=list(status_demo.keys()),
-                        title="Pedidos por Status - Demo", hole=0.4)
-            fig.update_layout(height=300)
-            st.plotly_chart(fig, use_container_width=True)
     
-    # Ações rápidas premium
+    # Ações rápidas
     st.markdown("## ⚡ Ações Rápidas")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -739,10 +544,10 @@ def mostrar_dashboard_premium():
             st.rerun()
 
 # =========================================
-# 🔐 SISTEMA DE LOGIN MULTI-FÁBRICA
+# 🔐 SISTEMA DE LOGIN
 # =========================================
 
-def verificar_login_multi_fabrica(username, password):
+def verificar_login(username, password):
     """Verifica credenciais no sistema multi-fábrica"""
     conn = get_connection()
     if not conn:
@@ -765,15 +570,6 @@ def verificar_login_multi_fabrica(username, password):
             cur.execute('UPDATE usuarios SET ultimo_login = CURRENT_TIMESTAMP WHERE id = %s', (resultado[0],))
             conn.commit()
             
-            # Criar notificação de login
-            criar_notificacao(
-                resultado[4], 
-                resultado[0],
-                'login', 
-                'Login realizado', 
-                f'Login realizado em {datetime.now().strftime("%d/%m/%Y %H:%M")}'
-            )
-            
             return True, resultado[2], resultado[3], resultado[0], resultado[4], resultado[5], resultado[6]
         else:
             return False, "Credenciais inválidas", None, None, None, None, None
@@ -783,8 +579,8 @@ def verificar_login_multi_fabrica(username, password):
     finally:
         conn.close()
 
-def login_premium():
-    """Interface de login premium"""
+def login_interface():
+    """Interface de login"""
     st.markdown("""
     <style>
         .login-container {
@@ -813,7 +609,7 @@ def login_premium():
             
             if st.form_submit_button("🚀 Entrar no Sistema", use_container_width=True):
                 if username and password:
-                    sucesso, mensagem, tipo_usuario, usuario_id, fabrica_id, fabrica_nome, plano = verificar_login_multi_fabrica(username, password)
+                    sucesso, mensagem, tipo_usuario, usuario_id, fabrica_id, fabrica_nome, plano = verificar_login(username, password)
                     if sucesso:
                         st.session_state.logged_in = True
                         st.session_state.username = username
@@ -838,10 +634,9 @@ def login_premium():
             st.write("**Usuário:** admin")
             st.write("**Senha:** admin123")
             st.write("**Fábrica:** Fábrica Demonstração")
-            st.info("💡 Sistema multi-fábrica pronto para escalar!")
 
 # =========================================
-# 📊 FUNÇÕES DE DADOS MULTI-FÁBRICA
+# 📊 FUNÇÕES DE DADOS
 # =========================================
 
 def obter_metricas_dashboard(fabrica_id):
@@ -855,27 +650,27 @@ def obter_metricas_dashboard(fabrica_id):
         
         # Total de pedidos
         cur.execute("SELECT COUNT(*) FROM pedidos WHERE fabrica_id = %s", (fabrica_id,))
-        total_pedidos = cur.fetchone()[0]
+        total_pedidos = cur.fetchone()[0] or 0
         
         # Pedidos do mês
         cur.execute("SELECT COUNT(*) FROM pedidos WHERE fabrica_id = %s AND DATE_TRUNC('month', data_pedido) = DATE_TRUNC('month', CURRENT_DATE)", (fabrica_id,))
-        pedidos_mes = cur.fetchone()[0]
+        pedidos_mes = cur.fetchone()[0] or 0
         
         # Faturamento mensal
         cur.execute("SELECT COALESCE(SUM(valor_total), 0) FROM pedidos WHERE fabrica_id = %s AND DATE_TRUNC('month', data_pedido) = DATE_TRUNC('month', CURRENT_DATE) AND status = 'Entregue'", (fabrica_id,))
-        faturamento_mes = cur.fetchone()[0]
+        faturamento_mes = cur.fetchone()[0] or 0
         
         # Clientes ativos
         cur.execute("SELECT COUNT(DISTINCT cliente_id) FROM pedidos WHERE fabrica_id = %s AND data_pedido >= CURRENT_DATE - INTERVAL '90 days'", (fabrica_id,))
-        clientes_ativos = cur.fetchone()[0]
+        clientes_ativos = cur.fetchone()[0] or 0
         
         # Produtos com estoque baixo
         cur.execute("SELECT COUNT(*) FROM produtos WHERE fabrica_id = %s AND estoque <= estoque_minimo AND ativo = TRUE", (fabrica_id,))
-        estoque_baixo = cur.fetchone()[0]
+        estoque_baixo = cur.fetchone()[0] or 0
         
         # Ticket médio
         cur.execute("SELECT COALESCE(AVG(valor_total), 0) FROM pedidos WHERE fabrica_id = %s AND status = 'Entregue'", (fabrica_id,))
-        ticket_medio = cur.fetchone()[0]
+        ticket_medio = cur.fetchone()[0] or 0
         
         return {
             'total_pedidos': total_pedidos,
@@ -901,7 +696,6 @@ def listar_produtos_por_fabrica(fabrica_id):
         cur.execute("SELECT * FROM produtos WHERE fabrica_id = %s ORDER BY nome", (fabrica_id,))
         return cur.fetchall()
     except Exception as e:
-        st.error(f"Erro ao listar produtos: {e}")
         return []
     finally:
         conn.close()
@@ -924,7 +718,6 @@ def listar_clientes_completos_por_fabrica(fabrica_id):
         ''', (fabrica_id, fabrica_id, fabrica_id))
         return cur.fetchall()
     except Exception as e:
-        st.error(f"Erro ao listar clientes: {e}")
         return []
     finally:
         conn.close()
@@ -946,7 +739,6 @@ def listar_pedidos_por_fabrica(fabrica_id):
         ''', (fabrica_id,))
         return cur.fetchall()
     except Exception as e:
-        st.error(f"Erro ao listar pedidos: {e}")
         return []
     finally:
         conn.close()
@@ -991,199 +783,11 @@ def obter_vendas_por_periodo(fabrica_id, dias=30):
         conn.close()
 
 # =========================================
-# 🆘 SISTEMA DE AJUDA COMPLETO
+# 📦 PÁGINAS DO SISTEMA
 # =========================================
 
-def pagina_ajuda_completa():
-    """Página de ajuda completa do sistema"""
-    st.markdown("## 🆘 Central de Ajuda - FactoryPilot")
-    
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["🎯 Comece Aqui", "📚 Tutoriais", "❓ FAQ", "📞 Suporte", "🏭 Sobre"])
-    
-    with tab1:
-        st.markdown("""
-        ## 🎯 Bem-vindo ao FactoryPilot!
-        
-        **Sistema inteligente de gestão para confecções e ateliês**
-        
-        ### 🚀 Primeiros Passos:
-        
-        #### 1️⃣ **Configuração Inicial**
-        ```python
-        ✓ Cadastre seus produtos no catálogo
-        ✓ Adicione seus clientes no CRM  
-        ✓ Configure sua equipe de usuários
-        ✓ Explore o dashboard inteligente
-        ```
-        
-        #### 2️⃣ **Fluxo de Trabalho Recomendado:**
-        ```
-        Cliente entra em contato → Cadastro no sistema → 
-        Criação do pedido → Controle de produção → 
-        Entrega → Recebimento → Análise de resultados
-        ```
-        
-        #### 3️⃣ **Dashboard Inteligente**
-        - **Métricas em tempo real** do seu negócio
-        - **IA que dá insights** automáticos
-        - **Alertas inteligentes** de estoque e prazos
-        - **Previsões** de vendas futuras
-        """)
-        
-        st.success("""
-        💡 **Dica Rápida:** Comece cadastrando 3-5 produtos e 2-3 clientes 
-        para testar o fluxo completo antes de migrar todos os dados.
-        """)
-    
-    with tab2:
-        st.markdown("## 📚 Tutoriais em Vídeo")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            ### 🎬 Vídeos Explicativos
-            
-            #### 📊 **Dashboard e IA**
-            - Como interpretar seus KPIs
-            - Usar o assistente inteligente
-            - Configurar alertas personalizados
-            
-            #### 👥 **Gestão de Clientes (CRM)**
-            - Cadastro completo de clientes
-            - Histórico de compras
-            - Segmentação por perfil
-            
-            #### 📦 **Controle de Pedidos**
-            - Fluxo completo do pedido
-            - Cálculo automático de lucro
-            - Controle de produção
-            """)
-        
-        with col2:
-            st.markdown("""
-            #### 👕 **Catálogo de Produtos**
-            - Cadastro com margem de lucro
-            - Controle de estoque inteligente
-            - Alertas de reposição
-            
-            #### 📈 **Relatórios Avançados**
-            - Análise financeira
-            - Performance de vendas
-            - Rentabilidade por produto
-            
-            #### ⚙️ **Configurações Multi-Fábrica**
-            - Gerenciar múltiplas unidades
-            - Perfis de usuário
-            - Permissões de acesso
-            """)
-    
-    with tab3:
-        st.markdown("## ❓ Perguntas Frequentes (FAQ)")
-        
-        with st.expander("🤔 Como faço o primeiro cadastro?"):
-            st.markdown("""
-            **Passo a passo inicial:**
-            1. Vá em **👕 Produtos** → **➕ Novo Produto**
-            2. Cadastre seus 5 produtos mais vendidos
-            3. Vá em **👥 Clientes** → **➕ Novo Cliente**  
-            4. Adicione seus 3 clientes principais
-            5. Volte ao **📊 Dashboard** para ver as métricas
-            """)
-        
-        with st.expander("💰 Como o sistema calcula meu lucro?"):
-            st.markdown("""
-            **Fórmula automática de lucro:**
-            ```
-            Preço de Venda - Preço de Custo = Lucro Unitário
-            Lucro Unitário × Quantidade = Lucro Total
-            ```
-            
-            **Exemplo prático:**
-            - Camiseta: Custo R$ 15 → Venda R$ 45
-            - Lucro: R$ 30 por unidade
-            - Pedido de 10 unidades: R$ 300 de lucro
-            """)
-        
-        with st.expander("🏭 Como funciona o multi-fábrica?"):
-            st.markdown("""
-            **Sistema escalável:**
-            - Cada fábrica tem dados **100% separados**
-            - Você pode gerenciar **múltiplas unidades**
-            - Preços por fábrica/plano
-            - Relatórios individuais e consolidados
-            
-            **Perfeito para:** Redes de confecções, franquias, grupos
-            """)
-    
-    with tab4:
-        st.markdown("## 📞 Canais de Suporte")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("""
-            ### 🎯 Suporte Prioritário
-            
-            #### 📱 **WhatsApp Business**
-            **🕒 Horário:** 9h-18h (segunda a sexta)
-            **🚀 Resposta:** Em até 15 minutos
-            
-            #### 📧 **E-mail Profissional**
-            **📬 Endereço:** suporte@factorypilot.com
-            **⏰ Resposta:** Em até 4 horas úteis
-            """)
-        
-        with col2:
-            st.markdown("""
-            ### 🛠️ Tipos de Suporte
-            
-            #### 🔧 **Suporte Técnico**
-            - Problemas de acesso
-            - Erros no sistema
-            - Configurações
-            
-            #### 💡 **Suporte Estratégico**
-            - Análise de métricas
-            - Otimização de processos
-            - Tomada de decisão
-            """)
-    
-    with tab5:
-        st.markdown("## 🏭 Sobre o FactoryPilot")
-        
-        st.markdown("""
-        ### 🎯 Nossa Missão
-        
-        **"Transformar a gestão de confecções através de tecnologia 
-        inteligente e acessível, permitindo que empreendedores 
-        foquem no que realmente importa: criar produtos incríveis."**
-        
-        ### 🚀 Tecnologia
-        
-        #### 🔧 **Stack Tecnológica:**
-        - **Frontend:** Streamlit (Python)
-        - **Backend:** PostgreSQL
-        - **IA:** Machine Learning integrado
-        - **Hospedagem:** Cloud profissional
-        
-        #### 📊 **Capacidades:**
-        - ✅ **+1.000 produtos** por fábrica
-        - ✅ **+5.000 clientes** na base
-        - ✅ **+10.000 pedidos** mensais
-        - ✅ **Multi-fábrica** simultâneo
-        
-        ---
-        
-        *"Organizar para crescer - Controlar para lucrar"* 🏭
-        """)
-
-# =========================================
-# 📦 PÁGINAS DO SISTEMA (Versões simplificadas)
-# =========================================
-
-def pagina_pedidos_premium():
-    """Página de pedidos premium"""
+def pagina_pedidos():
+    """Página de pedidos"""
     st.markdown("## 📦 Gestão de Pedidos")
     
     if 'fabrica_id' not in st.session_state:
@@ -1219,21 +823,10 @@ def pagina_pedidos_premium():
     
     with tab2:
         st.subheader("🎯 Criar Novo Pedido")
-        st.info("🚀 Funcionalidade completa em desenvolvimento...")
-        
-        # Aqui viria o formulário completo de novo pedido
-        with st.form("novo_pedido_simples"):
-            cliente = st.text_input("👤 Nome do Cliente")
-            produto = st.text_input("👕 Produto")
-            quantidade = st.number_input("📦 Quantidade", min_value=1, value=1)
-            valor = st.number_input("💰 Valor Unitário", min_value=0.0, value=0.0)
-            
-            if st.form_submit_button("✅ Criar Pedido"):
-                st.success("Pedido criado com sucesso! (Demo)")
-                # Aqui viria a lógica real de criação do pedido
+        st.info("🚀 Funcionalidade em desenvolvimento...")
 
-def pagina_clientes_premium():
-    """Página de clientes premium"""
+def pagina_clientes():
+    """Página de clientes"""
     st.markdown("## 👥 Gestão de Clientes")
     
     if 'fabrica_id' not in st.session_state:
@@ -1275,12 +868,11 @@ def pagina_clientes_premium():
             if st.form_submit_button("✅ Cadastrar Cliente"):
                 if nome:
                     st.success("Cliente cadastrado com sucesso! (Demo)")
-                    # Aqui viria a lógica real de cadastro
                 else:
                     st.error("❌ Nome é obrigatório!")
 
-def pagina_produtos_premium():
-    """Página de produtos premium"""
+def pagina_produtos():
+    """Página de produtos"""
     st.markdown("## 👕 Catálogo de Produtos")
     
     if 'fabrica_id' not in st.session_state:
@@ -1327,12 +919,11 @@ def pagina_produtos_premium():
             if st.form_submit_button("✅ Cadastrar Produto"):
                 if nome and preco_venda > 0:
                     st.success("Produto cadastrado com sucesso! (Demo)")
-                    # Aqui viria a lógica real de cadastro
                 else:
                     st.error("❌ Nome e preço de venda são obrigatórios!")
 
-def pagina_relatorios_premium():
-    """Página de relatórios premium"""
+def pagina_relatorios():
+    """Página de relatórios"""
     st.markdown("## 📈 Relatórios e Analytics")
     
     if 'fabrica_id' not in st.session_state:
@@ -1367,7 +958,70 @@ def pagina_relatorios_premium():
     
     with tab2:
         st.subheader("📊 Performance da Fábrica")
-        st.info("📈 Relatórios avançados de performance em desenvolvimento...")
+        st.info("📈 Relatórios avançados em desenvolvimento...")
+
+def pagina_ajuda():
+    """Página de ajuda"""
+    st.markdown("## 🆘 Central de Ajuda - FactoryPilot")
+    
+    tab1, tab2, tab3 = st.tabs(["🎯 Comece Aqui", "❓ FAQ", "🏭 Sobre"])
+    
+    with tab1:
+        st.markdown("""
+        ## 🎯 Bem-vindo ao FactoryPilot!
+        
+        **Sistema inteligente de gestão para confecções e ateliês**
+        
+        ### 🚀 Primeiros Passos:
+        
+        1. **Cadastre seus produtos** no catálogo
+        2. **Adicione seus clientes** no CRM  
+        3. **Crie pedidos** e acompanhe a produção
+        4. **Analise métricas** no dashboard
+        
+        ### 💡 Dicas Rápidas:
+        - Comece com 3-5 produtos para testar
+        - Use o sistema por 1 semana para dados reais
+        - Explore todos os módulos gradualmente
+        """)
+    
+    with tab2:
+        st.markdown("## ❓ Perguntas Frequentes")
+        
+        with st.expander("🤔 Como faço o primeiro cadastro?"):
+            st.markdown("""
+            1. Vá em **👕 Produtos** → **➕ Novo Produto**
+            2. Cadastre seus produtos mais vendidos
+            3. Vá em **👥 Clientes** → **➕ Novo Cliente**  
+            4. Adicione seus clientes principais
+            5. Volte ao **📊 Dashboard** para ver as métricas
+            """)
+        
+        with st.expander("💰 Como o sistema calcula meu lucro?"):
+            st.markdown("""
+            **Fórmula automática:**
+            ```
+            Preço de Venda - Preço de Custo = Lucro Unitário
+            Lucro Unitário × Quantidade = Lucro Total
+            ```
+            """)
+    
+    with tab3:
+        st.markdown("## 🏭 Sobre o FactoryPilot")
+        st.markdown("""
+        ### 🎯 Nossa Missão
+        
+        **Transformar a gestão de confecções através de tecnologia 
+        inteligente e acessível.**
+        
+        ### 🚀 Tecnologia
+        - **Frontend:** Streamlit
+        - **Backend:** PostgreSQL  
+        - **Hospedagem:** Cloud profissional
+        - **Multi-fábrica:** Escalável
+        
+        *"Organizar para crescer - Controlar para lucrar"* 🏭
+        """)
 
 # =========================================
 # 🚀 APLICAÇÃO PRINCIPAL
@@ -1384,30 +1038,14 @@ def main():
         st.session_state.logged_in = False
     
     if not st.session_state.logged_in:
-        login_premium()
+        login_interface()
         return
     
-    # Sidebar premium
+    # Sidebar
     with st.sidebar:
         st.markdown(f"## 🏭 {st.session_state.fabrica_nome}")
         st.markdown(f"**👤 Usuário:** {st.session_state.nome_usuario}")
         st.markdown(f"**🎯 Plano:** {st.session_state.plano}")
-        
-        # Notificações
-        notificacoes = obter_notificacoes(st.session_state.usuario_id)
-        if notificacoes:
-            with st.expander(f"🔔 Notificações ({len(notificacoes)})"):
-                for notif in notificacoes:
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.write(f"**{notif[4]}**")
-                        st.write(notif[5])
-                    with col2:
-                        if st.button("✓", key=f"read_{notif[0]}"):
-                            # Marcar como lida
-                            st.rerun()
-        else:
-            st.info("🔔 Nenhuma notificação")
         
         # Menu principal
         st.markdown("---")
@@ -1436,19 +1074,19 @@ def main():
     # Header
     mostrar_header()
     
-    # Conteúdo principal baseado no menu
+    # Conteúdo principal
     if menu == "📊 Dashboard":
-        mostrar_dashboard_premium()
+        mostrar_dashboard()
     elif menu == "📦 Pedidos":
-        pagina_pedidos_premium()
+        pagina_pedidos()
     elif menu == "👥 Clientes":
-        pagina_clientes_premium()
+        pagina_clientes()
     elif menu == "👕 Produtos":
-        pagina_produtos_premium()
+        pagina_produtos()
     elif menu == "📈 Relatórios":
-        pagina_relatorios_premium()
+        pagina_relatorios()
     elif menu == "🆘 Ajuda":
-        pagina_ajuda_completa()
+        pagina_ajuda()
 
 if __name__ == "__main__":
     main()
