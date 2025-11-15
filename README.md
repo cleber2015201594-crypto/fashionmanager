@@ -4,29 +4,34 @@ Sistema de gerenciamento de pedidos de fardamentos com controle de estoque, clie
 
 ## 🆕 Novas Funcionalidades na Versão 8.0
 
-### ✅ Produtos Vinculados às Escolas
-- Cada produto agora é cadastrado para uma escola específica
-- Filtros por escola em todas as telas de produtos
-- Relatórios mostram a escola de cada produto
+### ✅ Status de Pedidos Aprimorado
+- **Novos status**: Pendente, Em produção, Pronto para entrega, Entregue, Cancelado
+- **Controle completo** do fluxo do pedido
+- **Data de entrega real** registrada automaticamente
 
-### ✅ Clientes Simplificados
-- Removido o vínculo de escolas dos clientes
-- Clientes podem comprar produtos de qualquer escola
-- Cadastro de clientes mais simples e rápido
+### ✅ Forma de Pagamento
+- **Múltiplas opções**: Dinheiro, Cartão de Crédito, Cartão de Débito, PIX, Transferência
+- **Registro no pedido** para controle financeiro
 
-### ✅ Melhorias na Interface
-- Filtros por escola em produtos e estoque
-- Visualização da escola em todos os lugares
-- Interface mais limpa e intuitiva
+### ✅ Correção do Banco de Dados
+- **Campo escola_id** adicionado na tabela produtos
+- **Estrutura corrigida** para evitar erros
 
 ## Funcionalidades Principais
 - 📊 Dashboard com métricas em tempo real
-- 📦 Gestão completa de pedidos
+- 📦 Gestão completa de pedidos com status
 - 👥 Cadastro simplificado de clientes
 - 👕 Cadastro de produtos vinculados a escolas
 - 📦 Controle de estoque automático
 - 📈 Relatórios detalhados de vendas
 - 🔐 Sistema de login com múltiplos usuários
+
+## Status dos Pedidos
+- 🟡 **Pendente**: Pedido recebido
+- 🟠 **Em produção**: Em confecção
+- 🔵 **Pronto para entrega**: Aguardando retirada/entrega
+- 🟢 **Entregue**: Finalizado com sucesso
+- 🔴 **Cancelado**: Pedido cancelado
 
 ## Login
 - **Admin:** admin / Admin@2024!
