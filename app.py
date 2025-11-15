@@ -58,16 +58,6 @@ def init_db():
                 )
             ''')
             
-            # Tabela de relação cliente-escola
-            cur.execute('''
-                CREATE TABLE IF NOT EXISTS cliente_escolas (
-                    id SERIAL PRIMARY KEY,
-                    cliente_id INTEGER REFERENCES clientes(id) ON DELETE CASCADE,
-                    escola_id INTEGER REFERENCES escolas(id) ON DELETE CASCADE,
-                    UNIQUE(cliente_id, escola_id)
-                )
-            ''')
-            
             # Tabela de produtos
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS produtos (
@@ -79,6 +69,7 @@ def init_db():
                     preco DECIMAL(10,2),
                     estoque INTEGER DEFAULT 0,
                     descricao TEXT,
+                    escola_id INTEGER REFERENCES escolas(id),
                     data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -323,7 +314,7 @@ tipos_agasalhos = ["Blusão", "Moletom"]
 # =========================================
 
 # FUNÇÕES PARA CLIENTES
-def adicionar_cliente(nome, telefone, email, escolas_ids):
+def adicionar_cliente(nome, telefone, email):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -336,13 +327,6 @@ def adicionar_cliente(nome, telefone, email, escolas_ids):
             "INSERT INTO clientes (nome, telefone, email, data_cadastro) VALUES (%s, %s, %s, %s) RETURNING id",
             (nome, telefone, email, data_cadastro)
         )
-        cliente_id = cur.fetchone()[0]
-        
-        for escola_id in escolas_ids:
-            cur.execute(
-                "INSERT INTO cliente_escolas (cliente_id, escola_id) VALUES (%s, %s)",
-                (cliente_id, escola_id)
-            )
         
         conn.commit()
         return True, "Cliente cadastrado com sucesso!"
@@ -361,12 +345,7 @@ def listar_clientes():
     try:
         cur = conn.cursor()
         cur.execute('''
-            SELECT c.*, STRING_AGG(e.nome, ', ') as escolas
-            FROM clientes c
-            LEFT JOIN cliente_escolas ce ON c.id = ce.cliente_id
-            LEFT JOIN escolas e ON ce.escola_id = e.id
-            GROUP BY c.id
-            ORDER BY c.nome
+            SELECT * FROM clientes ORDER BY nome
         ''')
         return cur.fetchall()
     except Exception as e:
@@ -399,7 +378,7 @@ def excluir_cliente(cliente_id):
         conn.close()
 
 # FUNÇÕES PARA PRODUTOS
-def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao):
+def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -407,9 +386,9 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao):
     try:
         cur = conn.cursor()
         cur.execute('''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (nome, categoria, tamanho, cor, preco, estoque, descricao))
+            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id))
         
         conn.commit()
         return True, "Produto cadastrado com sucesso!"
@@ -426,7 +405,41 @@ def listar_produtos():
     
     try:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM produtos ORDER BY nome")
+        cur.execute('''
+            SELECT p.*, e.nome as escola_nome 
+            FROM produtos p 
+            LEFT JOIN escolas e ON p.escola_id = e.id 
+            ORDER BY p.nome
+        ''')
+        return cur.fetchall()
+    except Exception as e:
+        st.error(f"Erro ao listar produtos: {e}")
+        return []
+    finally:
+        conn.close()
+
+def listar_produtos_por_escola(escola_id=None):
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor()
+        if escola_id:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                WHERE p.escola_id = %s
+                ORDER BY p.nome
+            ''', (escola_id,))
+        else:
+            cur.execute('''
+                SELECT p.*, e.nome as escola_nome 
+                FROM produtos p 
+                LEFT JOIN escolas e ON p.escola_id = e.id 
+                ORDER BY p.nome
+            ''')
         return cur.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar produtos: {e}")
@@ -601,17 +614,19 @@ def gerar_relatorio_produtos():
                 pr.categoria,
                 pr.tamanho,
                 pr.cor,
+                e.nome as escola,
                 SUM(pi.quantidade) as total_vendido,
                 SUM(pi.subtotal) as total_faturado
             FROM pedido_itens pi
             JOIN produtos pr ON pi.produto_id = pr.id
-            GROUP BY pr.id, pr.nome, pr.categoria, pr.tamanho, pr.cor
+            LEFT JOIN escolas e ON pr.escola_id = e.id
+            GROUP BY pr.id, pr.nome, pr.categoria, pr.tamanho, pr.cor, e.nome
             ORDER BY total_vendido DESC
         ''')
         dados = cur.fetchall()
         
         if dados:
-            df = pd.DataFrame(dados, columns=['Produto', 'Categoria', 'Tamanho', 'Cor', 'Total Vendido', 'Total Faturado (R$)'])
+            df = pd.DataFrame(dados, columns=['Produto', 'Categoria', 'Tamanho', 'Cor', 'Escola', 'Total Vendido', 'Total Faturado (R$)'])
             return df
         else:
             return pd.DataFrame()
@@ -797,24 +812,16 @@ elif menu == "👥 Clientes":
         telefone = st.text_input("📞 Telefone")
         email = st.text_input("📧 Email")
         
-        escolas_db = listar_escolas()
-        escolas_selecionadas = st.multiselect(
-            "🏫 Escolas do cliente*",
-            [e[1] for e in escolas_db],
-            help="Cliente pode ter acesso a múltiplas escolas"
-        )
-        
         if st.button("✅ Cadastrar Cliente", type="primary"):
-            if nome and escolas_selecionadas:
-                escolas_ids = [e[0] for e in escolas_db if e[1] in escolas_selecionadas]
-                sucesso, msg = adicionar_cliente(nome, telefone, email, escolas_ids)
+            if nome:
+                sucesso, msg = adicionar_cliente(nome, telefone, email)
                 if sucesso:
                     st.success(msg)
                     st.balloons()
                 else:
                     st.error(msg)
             else:
-                st.error("❌ Nome e pelo menos uma escola são obrigatórios!")
+                st.error("❌ Nome é obrigatório!")
     
     with tab2:
         st.header("📋 Clientes Cadastrados")
@@ -828,8 +835,7 @@ elif menu == "👥 Clientes":
                     'Nome': cliente[1],
                     'Telefone': cliente[2] or 'N/A',
                     'Email': cliente[3] or 'N/A',
-                    'Escolas': cliente[4] or 'Nenhuma',
-                    'Data Cadastro': cliente[5]
+                    'Data Cadastro': cliente[4]
                 })
             
             st.dataframe(pd.DataFrame(dados), use_container_width=True)
@@ -874,20 +880,41 @@ elif menu == "👕 Produtos":
         estoque = st.number_input("Estoque inicial", min_value=0, value=10)
         descricao = st.text_area("Descrição")
         
+        # Seleção de escola para o produto
+        escolas_db = listar_escolas()
+        escola_selecionada = st.selectbox(
+            "🏫 Escola do produto*",
+            [e[1] for e in escolas_db],
+            help="Selecione a escola para a qual este produto é destinado"
+        )
+        
         if st.button("✅ Cadastrar Produto", type="primary"):
-            if nome:
-                sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao)
+            if nome and escola_selecionada:
+                escola_id = next(e[0] for e in escolas_db if e[1] == escola_selecionada)
+                sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, descricao, escola_id)
                 if sucesso:
                     st.success(msg)
                     st.balloons()
                 else:
                     st.error(msg)
             else:
-                st.error("❌ Nome do produto é obrigatório!")
+                st.error("❌ Nome do produto e escola são obrigatórios!")
     
     with tab2:
         st.header("📋 Produtos Cadastrados")
-        produtos = listar_produtos()
+        
+        # Filtro por escola
+        escolas_db = listar_escolas()
+        escola_filtro = st.selectbox(
+            "Filtrar por escola:",
+            ["Todas as escolas"] + [e[1] for e in escolas_db]
+        )
+        
+        if escola_filtro == "Todas as escolas":
+            produtos = listar_produtos()
+        else:
+            escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+            produtos = listar_produtos_por_escola(escola_id)
         
         if produtos:
             dados = []
@@ -900,7 +927,8 @@ elif menu == "👕 Produtos":
                     'Cor': produto[4],
                     'Preço': f"R$ {produto[5]:.2f}",
                     'Estoque': produto[6],
-                    'Descrição': produto[7] or 'N/A'
+                    'Descrição': produto[7] or 'N/A',
+                    'Escola': produto[9] or 'N/A'
                 })
             
             st.dataframe(pd.DataFrame(dados), use_container_width=True)
@@ -909,19 +937,32 @@ elif menu == "👕 Produtos":
 
 elif menu == "📦 Estoque":
     st.header("📊 Ajuste de Estoque")
-    produtos = listar_produtos()
+    
+    # Filtro por escola
+    escolas_db = listar_escolas()
+    escola_filtro = st.selectbox(
+        "Filtrar por escola:",
+        ["Todas as escolas"] + [e[1] for e in escolas_db]
+    )
+    
+    if escola_filtro == "Todas as escolas":
+        produtos = listar_produtos()
+    else:
+        escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+        produtos = listar_produtos_por_escola(escola_id)
     
     if produtos:
         produto_selecionado = st.selectbox(
             "Selecione o produto:",
-            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Estoque: {p[6]}" for p in produtos]
+            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]}" for p in produtos]
         )
         
         if produto_selecionado:
-            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Estoque: {p[6]}" == produto_selecionado)
+            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]}" == produto_selecionado)
             produto = next(p for p in produtos if p[0] == produto_id)
             
             st.write(f"**Produto selecionado:** {produto[1]}")
+            st.write(f"**Escola:** {produto[9]}")
             st.write(f"**Estoque atual:** {produto[6]} unidades")
             
             nova_quantidade = st.number_input("Nova quantidade em estoque", min_value=0, value=produto[6])
@@ -956,8 +997,19 @@ elif menu == "📦 Pedidos":
             if cliente_selecionado:
                 cliente_id = int(cliente_selecionado.split("(ID: ")[1].replace(")", ""))
                 
-                # Selecionar produtos
-                produtos = listar_produtos()
+                # Filtro de produtos por escola
+                escolas_db = listar_escolas()
+                escola_filtro = st.selectbox(
+                    "🏫 Filtrar produtos por escola:",
+                    ["Todas as escolas"] + [e[1] for e in escolas_db]
+                )
+                
+                if escola_filtro == "Todas as escolas":
+                    produtos = listar_produtos()
+                else:
+                    escola_id = next(e[0] for e in escolas_db if e[1] == escola_filtro)
+                    produtos = listar_produtos_por_escola(escola_id)
+                
                 if produtos:
                     st.subheader("🛒 Itens do Pedido")
                     
@@ -966,7 +1018,7 @@ elif menu == "📦 Pedidos":
                     with col1:
                         produto_selecionado = st.selectbox(
                             "Produto:",
-                            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Estoque: {p[6]} - R$ {p[5]:.2f}" for p in produtos]
+                            [f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]} - R$ {p[5]:.2f}" for p in produtos]
                         )
                     with col2:
                         quantidade = st.number_input("Quantidade", min_value=1, value=1)
@@ -975,7 +1027,7 @@ elif menu == "📦 Pedidos":
                             if 'itens_pedido' not in st.session_state:
                                 st.session_state.itens_pedido = []
                             
-                            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Estoque: {p[6]} - R$ {p[5]:.2f}" == produto_selecionado)
+                            produto_id = next(p[0] for p in produtos if f"{p[1]} - Tamanho: {p[3]} - Cor: {p[4]} - Escola: {p[9]} - Estoque: {p[6]} - R$ {p[5]:.2f}" == produto_selecionado)
                             produto = next(p for p in produtos if p[0] == produto_id)
                             
                             if quantidade > produto[6]:
@@ -984,6 +1036,7 @@ elif menu == "📦 Pedidos":
                                 item = {
                                     'produto_id': produto_id,
                                     'nome': produto[1],
+                                    'escola': produto[9],
                                     'quantidade': quantidade,
                                     'preco_unitario': float(produto[5]),
                                     'subtotal': float(produto[5]) * quantidade
@@ -998,14 +1051,17 @@ elif menu == "📦 Pedidos":
                         total_pedido = sum(item['subtotal'] for item in st.session_state.itens_pedido)
                         
                         for i, item in enumerate(st.session_state.itens_pedido):
-                            col1, col2, col3, col4 = st.columns([3,1,1,1])
+                            col1, col2, col3, col4, col5 = st.columns([3,1,1,1,1])
                             with col1:
                                 st.write(f"**{item['nome']}**")
+                                st.write(f"Escola: {item['escola']}")
                             with col2:
                                 st.write(f"Qtd: {item['quantidade']}")
                             with col3:
                                 st.write(f"R$ {item['preco_unitario']:.2f}")
                             with col4:
+                                st.write(f"R$ {item['subtotal']:.2f}")
+                            with col5:
                                 if st.button("❌", key=f"del_{i}"):
                                     st.session_state.itens_pedido.pop(i)
                                     st.rerun()
@@ -1148,7 +1204,7 @@ elif menu == "📈 Relatórios":
 
 # Rodapé
 st.sidebar.markdown("---")
-st.sidebar.info("👕 Sistema de Fardamentos v7.0\n\n🗄️ **Banco de Dados PostgreSQL**")
+st.sidebar.info("👕 Sistema de Fardamentos v8.0\n\n🗄️ **Banco de Dados PostgreSQL**")
 
 # Botão para recarregar dados
 if st.sidebar.button("🔄 Recarregar Dados"):
