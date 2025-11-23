@@ -41,14 +41,6 @@ st.markdown("""
 # 🗃️ CONEXÃO COM BANCO
 # =========================================
 
-def get_db_type():
-    """Detecta o tipo de banco de dados"""
-    return 'postgresql' if os.environ.get('DATABASE_URL') else 'sqlite'
-
-def get_placeholder():
-    """Retorna o placeholder correto para o banco"""
-    return '%s' if get_db_type() == 'postgresql' else '?'
-
 def get_connection():
     """Conexão com PostgreSQL do Render"""
     try:
@@ -71,7 +63,6 @@ def get_connection():
             # Para desenvolvimento local - usar SQLite
             import sqlite3
             conn = sqlite3.connect('local.db', check_same_thread=False)
-            conn.row_factory = sqlite3.Row  # Para acesso por nome de coluna
             return conn
             
     except Exception as e:
@@ -88,9 +79,9 @@ def init_db():
         cur = conn.cursor()
         
         # Verificar se estamos usando PostgreSQL ou SQLite
-        db_type = get_db_type()
+        is_postgres = os.environ.get('DATABASE_URL') is not None
         
-        if db_type == 'postgresql':
+        if is_postgres:
             # Tabela de usuários - PostgreSQL
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS usuarios (
@@ -128,11 +119,15 @@ def init_db():
             ''')
             
             # Inserir usuário admin padrão
-            cur.execute('''
-                INSERT INTO usuarios (username, password, nome, tipo) 
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (username) DO NOTHING
-            ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            try:
+                cur.execute('''
+                    INSERT INTO usuarios (username, password, nome, tipo) 
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (username) DO NOTHING
+                ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            except Exception as e:
+                st.warning(f"Aviso ao criar usuário admin: {e}")
+                
         else:
             # SQLite
             cur.execute('''
@@ -168,10 +163,13 @@ def init_db():
                 )
             ''')
             
-            cur.execute('''
-                INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
-                VALUES (?, ?, ?, ?)
-            ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            try:
+                cur.execute('''
+                    INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
+                    VALUES (?, ?, ?, ?)
+                ''', ('admin', 'admin123', 'Administrador', 'admin'))
+            except Exception as e:
+                st.warning(f"Aviso ao criar usuário admin: {e}")
         
         conn.commit()
         return True
@@ -194,30 +192,23 @@ def check_login(username, password):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
         
-        query = f'SELECT password, nome, tipo FROM usuarios WHERE username = {placeholder}'
-        cur.execute(query, (username,))
+        # Verificar tipo de banco
+        is_postgres = os.environ.get('DATABASE_URL') is not None
+        
+        if is_postgres:
+            # PostgreSQL
+            cur.execute('SELECT password, nome, tipo FROM usuarios WHERE username = %s', (username,))
+        else:
+            # SQLite
+            cur.execute('SELECT password, nome, tipo FROM usuarios WHERE username = ?', (username,))
+            
         result = cur.fetchone()
         
-        if result:
-            # Converter para dicionário se for SQLite Row
-            if hasattr(result, '_asdict'):
-                result_dict = result._asdict()
-            elif hasattr(result, 'keys'):
-                result_dict = dict(zip([desc[0] for desc in cur.description], result))
-            else:
-                # Para PostgreSQL tupla simples
-                result_dict = {
-                    'password': result[0],
-                    'nome': result[1],
-                    'tipo': result[2]
-                }
-            
-            if result_dict['password'] == password:
-                return True, result_dict['nome'], result_dict['tipo']
-        
-        return False, "Credenciais inválidas", None
+        if result and result[0] == password:
+            return True, result[1], result[2]
+        else:
+            return False, "Credenciais inválidas", None
             
     except Exception as e:
         return False, f"Erro: {str(e)}", None
@@ -267,13 +258,20 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
         
-        query = f'''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque)
-            VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-        '''
-        cur.execute(query, (nome, categoria, tamanho, cor, preco, estoque))
+        is_postgres = os.environ.get('DATABASE_URL') is not None
+        
+        if is_postgres:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (nome, categoria, tamanho, cor, preco, estoque))
+        else:
+            cur.execute('''
+                INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (nome, categoria, tamanho, cor, preco, estoque))
+            
         conn.commit()
         return True, "✅ Produto cadastrado com sucesso!"
     except Exception as e:
@@ -306,13 +304,20 @@ def adicionar_cliente(nome, telefone, email):
     
     try:
         cur = conn.cursor()
-        placeholder = get_placeholder()
         
-        query = f'''
-            INSERT INTO clientes (nome, telefone, email)
-            VALUES ({placeholder}, {placeholder}, {placeholder})
-        '''
-        cur.execute(query, (nome, telefone, email))
+        is_postgres = os.environ.get('DATABASE_URL') is not None
+        
+        if is_postgres:
+            cur.execute('''
+                INSERT INTO clientes (nome, telefone, email)
+                VALUES (%s, %s, %s)
+            ''', (nome, telefone, email))
+        else:
+            cur.execute('''
+                INSERT INTO clientes (nome, telefone, email)
+                VALUES (?, ?, ?)
+            ''', (nome, telefone, email))
+            
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
     except Exception as e:
@@ -470,7 +475,6 @@ elif menu == "👕 Produtos":
         if produtos:
             dados = []
             for produto in produtos:
-                # Acessar por índice já que é uma tupla
                 status = "✅" if produto[6] >= 5 else "⚠️" if produto[6] > 0 else "❌"
                 dados.append({
                     'ID': produto[0],
