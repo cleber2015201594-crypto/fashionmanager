@@ -60,9 +60,10 @@ def get_connection():
             )
             return conn
         else:
-            # Para desenvolvimento local
+            # Para desenvolvimento local - usar SQLite
             import sqlite3
             conn = sqlite3.connect('local.db', check_same_thread=False)
+            conn.row_factory = sqlite3.Row  # Para acesso por nome de coluna
             return conn
             
     except Exception as e:
@@ -78,48 +79,91 @@ def init_db():
     try:
         cur = conn.cursor()
         
-        # Tabela de usuários
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                nome TEXT,
-                tipo TEXT DEFAULT 'vendedor'
-            )
-        ''')
+        # Verificar se estamos usando PostgreSQL ou SQLite
+        is_postgres = os.environ.get('DATABASE_URL') is not None
         
-        # Tabela de produtos
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS produtos (
-                id SERIAL PRIMARY KEY,
-                nome TEXT NOT NULL,
-                categoria TEXT,
-                tamanho TEXT,
-                cor TEXT,
-                preco DECIMAL(10,2),
-                estoque INTEGER DEFAULT 0,
-                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        # Tabela de clientes
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS clientes (
-                id SERIAL PRIMARY KEY,
-                nome TEXT NOT NULL,
-                telefone TEXT,
-                email TEXT,
-                data_cadastro DATE DEFAULT CURRENT_DATE
-            )
-        ''')
-        
-        # Inserir usuário admin padrão
-        cur.execute('''
-            INSERT INTO usuarios (username, password, nome, tipo) 
-            VALUES ('admin', 'admin123', 'Administrador', 'admin')
-            ON CONFLICT (username) DO NOTHING
-        ''')
+        if is_postgres:
+            # Tabela de usuários - PostgreSQL
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    nome TEXT,
+                    tipo TEXT DEFAULT 'vendedor'
+                )
+            ''')
+            
+            # Tabela de produtos - PostgreSQL
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS produtos (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    categoria TEXT,
+                    tamanho TEXT,
+                    cor TEXT,
+                    preco DECIMAL(10,2),
+                    estoque INTEGER DEFAULT 0,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Tabela de clientes - PostgreSQL
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id SERIAL PRIMARY KEY,
+                    nome TEXT NOT NULL,
+                    telefone TEXT,
+                    email TEXT,
+                    data_cadastro DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            # Inserir usuário admin padrão
+            cur.execute('''
+                INSERT INTO usuarios (username, password, nome, tipo) 
+                VALUES ('admin', 'admin123', 'Administrador', 'admin')
+                ON CONFLICT (username) DO NOTHING
+            ''')
+        else:
+            # SQLite
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    nome TEXT,
+                    tipo TEXT DEFAULT 'vendedor'
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS produtos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    categoria TEXT,
+                    tamanho TEXT,
+                    cor TEXT,
+                    preco REAL,
+                    estoque INTEGER DEFAULT 0,
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            cur.execute('''
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    nome TEXT NOT NULL,
+                    telefone TEXT,
+                    email TEXT,
+                    data_cadastro DATE DEFAULT CURRENT_DATE
+                )
+            ''')
+            
+            cur.execute('''
+                INSERT OR IGNORE INTO usuarios (username, password, nome, tipo) 
+                VALUES ('admin', 'admin123', 'Administrador', 'admin')
+            ''')
         
         conn.commit()
         return True
@@ -142,7 +186,7 @@ def check_login(username, password):
     
     try:
         cur = conn.cursor()
-        cur.execute('SELECT password, nome, tipo FROM usuarios WHERE username = %s', (username,))
+        cur.execute('SELECT password, nome, tipo FROM usuarios WHERE username = ?', (username,))
         result = cur.fetchone()
         
         if result and result[0] == password:  # Senha em texto simples para simplificar
@@ -200,7 +244,7 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque):
         cur = conn.cursor()
         cur.execute('''
             INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            VALUES (?, ?, ?, ?, ?, ?)
         ''', (nome, categoria, tamanho, cor, preco, estoque))
         conn.commit()
         return True, "✅ Produto cadastrado com sucesso!"
@@ -236,7 +280,7 @@ def adicionar_cliente(nome, telefone, email):
         cur = conn.cursor()
         cur.execute('''
             INSERT INTO clientes (nome, telefone, email)
-            VALUES (%s, %s, %s)
+            VALUES (?, ?, ?)
         ''', (nome, telefone, email))
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
