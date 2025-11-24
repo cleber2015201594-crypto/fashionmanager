@@ -88,26 +88,79 @@ def get_connection():
         database_url = os.environ.get('DATABASE_URL')
         
         if database_url:
-            # PostgreSQL no Render - método mais robusto
-            # Converter a URL do formato do Render para formato de conexão do psycopg2
+            # ✅ CORREÇÃO: Método robusto para PostgreSQL
             if database_url.startswith('postgres://'):
                 database_url = database_url.replace('postgres://', 'postgresql://', 1)
             
-            conn = psycopg2.connect(database_url, sslmode='require')
+            # ✅ CORREÇÃO: Usar parse para extrair componentes da URL
+            parsed = urllib.parse.urlparse(database_url)
+            
+            # Extrair credenciais da URL
+            username = parsed.username
+            password = parsed.password
+            hostname = parsed.hostname
+            port = parsed.port or 5432
+            database = parsed.path[1:]  # Remove a barra inicial
+            
+            # ✅ CORREÇÃO: Conexão com parâmetros nomeados corretos
+            conn = psycopg2.connect(
+                host=hostname,
+                database=database,
+                user=username,
+                password=password,  # ✅ Nome correto do parâmetro
+                port=port,
+                sslmode='require'
+            )
             return conn
         else:
             # SQLite local para desenvolvimento
-            import sqlite3
             conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
             conn.row_factory = sqlite3.Row
             return conn
     except Exception as e:
         st.error(f"❌ Erro de conexão: {str(e)}")
-        return None
+        # Tentar conexão alternativa
+        return try_alternative_connection()
+
+def try_alternative_connection():
+    """Tenta conexão alternativa com PostgreSQL"""
+    try:
+        # Tentar com variáveis de ambiente individuais
+        db_host = os.environ.get('DB_HOST')
+        db_name = os.environ.get('DB_NAME')
+        db_user = os.environ.get('DB_USER')
+        db_password = os.environ.get('DB_PASSWORD')  # ✅ Nome correto
+        db_port = os.environ.get('DB_PORT', '5432')
+        
+        if all([db_host, db_name, db_user, db_password]):
+            conn = psycopg2.connect(
+                host=db_host,
+                database=db_name,
+                user=db_user,
+                password=db_password,  # ✅ Nome correto
+                port=db_port
+            )
+            return conn
+        else:
+            # Fallback para SQLite
+            conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            return conn
+    except Exception as e:
+        st.error(f"❌ Erro na conexão alternativa: {str(e)}")
+        # Último fallback - SQLite local
+        try:
+            conn = sqlite3.connect('fashionmanager.db', check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            st.info("📁 Usando banco SQLite local")
+            return conn
+        except Exception as sqlite_error:
+            st.error(f"❌ Erro crítico: {sqlite_error}")
+            return None
 
 def get_placeholder():
     """Retorna o placeholder correto para o banco"""
-    return '%s' if os.environ.get('DATABASE_URL') else '?'
+    return '%s' if os.environ.get('DATABASE_URL') or os.environ.get('DB_HOST') else '?'
 
 def formatar_data_brasil(data):
     """Formata data para o padrão brasileiro DD/MM/YYYY"""
@@ -137,16 +190,17 @@ def init_db():
     """Inicializa o banco de dados com tabelas necessárias"""
     conn = get_connection()
     if not conn:
+        st.error("❌ Não foi possível conectar ao banco de dados")
         return False
     
     try:
         cur = conn.cursor()
         
         # Verificar se estamos usando PostgreSQL ou SQLite
-        is_postgres = os.environ.get('DATABASE_URL') is not None
+        is_postgres = os.environ.get('DATABASE_URL') is not None or os.environ.get('DB_HOST') is not None
         
         if is_postgres:
-            # PostgreSQL - usar SERIAL para auto-increment
+            # ✅ CORREÇÃO: PostgreSQL - usar sintaxe correta
             cur.execute('''
                 CREATE TABLE IF NOT EXISTS usuarios (
                     id SERIAL PRIMARY KEY,
@@ -282,6 +336,7 @@ def init_db():
             ''', ('Escola Principal', 'Endereço padrão', '(11) 99999-9999', 'contato@escola.com'))
         
         conn.commit()
+        st.success("✅ Banco de dados inicializado com sucesso!")
         return True
         
     except Exception as e:
@@ -855,7 +910,7 @@ st.sidebar.markdown("👕 **FashionManager**")
 st.sidebar.caption("v6.0 • Mobile")
 
 # Indicador de ambiente
-if os.environ.get('DATABASE_URL'):
+if os.environ.get('DATABASE_URL') or os.environ.get('DB_HOST'):
     st.sidebar.success("🌐 Online")
 else:
     st.sidebar.info("💻 Local")
