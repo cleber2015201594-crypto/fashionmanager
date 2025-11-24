@@ -5,6 +5,15 @@ from datetime import datetime, date, timedelta
 import numpy as np
 import io
 import csv
+import base64
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+import tempfile
+import os
 
 # =========================================
 # 🎯 CONFIGURAÇÃO
@@ -63,6 +72,10 @@ st.markdown("""
         padding: 1rem;
         border-radius: 8px;
         margin: 0.5rem 0;
+    }
+    .pagination-btn {
+        margin: 0 0.2rem;
+        padding: 0.3rem 0.6rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -132,17 +145,22 @@ def check_hashes(password, hashed_text):
     return make_hashes(password) == hashed_text
 
 def get_connection():
-    """Conexão com SQLite"""
+    """Conexão com SQLite otimizada"""
     try:
         conn = sqlite3.connect('sistema_fardamentos.db', check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # Otimizações para melhor performance
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA cache_size=10000")
+        conn.execute("PRAGMA temp_store=MEMORY")
         return conn
     except Exception as e:
         st.error(f"Erro de conexão: {str(e)}")
         return None
 
 def init_db():
-    """Inicializa banco de dados"""
+    """Inicializa banco de dados com otimizações"""
     conn = get_connection()
     if not conn:
         return False
@@ -158,7 +176,8 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 nome_completo TEXT,
                 tipo TEXT DEFAULT 'vendedor',
-                ativo INTEGER DEFAULT 1
+                ativo INTEGER DEFAULT 1,
+                data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -168,7 +187,9 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT UNIQUE NOT NULL,
                 endereco TEXT,
-                telefone TEXT
+                telefone TEXT,
+                email TEXT,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -179,7 +200,11 @@ def init_db():
                 nome TEXT NOT NULL,
                 telefone TEXT,
                 email TEXT,
-                data_cadastro DATE DEFAULT CURRENT_DATE
+                data_nascimento DATE,
+                cpf TEXT,
+                endereco TEXT,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ativo INTEGER DEFAULT 1
             )
         ''')
         
@@ -192,9 +217,12 @@ def init_db():
                 tamanho TEXT,
                 cor TEXT,
                 preco REAL,
+                custo REAL,
                 estoque INTEGER DEFAULT 0,
+                estoque_minimo INTEGER DEFAULT 5,
                 escola_id INTEGER,
                 data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ativo INTEGER DEFAULT 1,
                 UNIQUE(nome, tamanho, cor, escola_id),
                 FOREIGN KEY (escola_id) REFERENCES escolas (id)
             )
@@ -210,8 +238,13 @@ def init_db():
                 data_entrega_prevista DATE,
                 data_entrega_real DATE,
                 valor_total REAL DEFAULT 0,
+                desconto REAL DEFAULT 0,
+                valor_final REAL DEFAULT 0,
                 observacoes TEXT,
-                FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+                forma_pagamento TEXT,
+                vendedor_id INTEGER,
+                FOREIGN KEY (cliente_id) REFERENCES clientes (id),
+                FOREIGN KEY (vendedor_id) REFERENCES usuarios (id)
             )
         ''')
         
@@ -224,10 +257,21 @@ def init_db():
                 quantidade INTEGER,
                 preco_unitario REAL,
                 subtotal REAL,
-                FOREIGN KEY (pedido_id) REFERENCES pedidos (id),
+                FOREIGN KEY (pedido_id) REFERENCES pedidos (id) ON DELETE CASCADE,
                 FOREIGN KEY (produto_id) REFERENCES produtos (id)
             )
         ''')
+        
+        # Índices para melhor performance
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_id ON pedidos(cliente_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pedidos_data ON pedidos(data_pedido)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pedidos_status ON pedidos(status)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pedido_itens_pedido ON pedido_itens(pedido_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_pedido_itens_produto ON pedido_itens(produto_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_produtos_escola ON produtos(escola_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_produtos_categoria ON produtos(categoria)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_clientes_nome ON clientes(nome)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_clientes_data ON clientes(data_cadastro)')
         
         # Usuários padrão
         usuarios_padrao = [
@@ -244,29 +288,31 @@ def init_db():
         
         # Escolas padrão
         escolas_padrao = [
-            ('Escola Municipal', 'Rua Principal, 123', '(11) 9999-8888'),
-            ('Colégio Desperta', 'Av. Central, 456', '(11) 7777-6666'),
-            ('Instituto São Tadeu', 'Praça da Matriz, 789', '(11) 5555-4444')
+            ('Escola Municipal', 'Rua Principal, 123', '(11) 9999-8888', 'contato@escolamunicipal.com'),
+            ('Colégio Desperta', 'Av. Central, 456', '(11) 7777-6666', 'contato@colegiodesperta.com'),
+            ('Instituto São Tadeu', 'Praça da Matriz, 789', '(11) 5555-4444', 'contato@institutosãotadeu.com')
         ]
         
-        for nome, endereco, telefone in escolas_padrao:
-            cursor.execute('INSERT OR IGNORE INTO escolas (nome, endereco, telefone) VALUES (?, ?, ?)', 
-                         (nome, endereco, telefone))
+        for nome, endereco, telefone, email in escolas_padrao:
+            cursor.execute('INSERT OR IGNORE INTO escolas (nome, endereco, telefone, email) VALUES (?, ?, ?, ?)', 
+                         (nome, endereco, telefone, email))
         
         # Produtos de exemplo
         produtos_padrao = [
-            ('Camiseta Polo', 'Camiseta', 'M', 'Branco', 29.90, 50, 1),
-            ('Calça Jeans', 'Calça', '42', 'Azul', 89.90, 30, 1),
-            ('Agasalho', 'Agasalho', 'G', 'Verde', 129.90, 20, 2),
-            ('Short', 'Short', 'P', 'Preto', 39.90, 40, 2),
-            ('Camiseta Regata', 'Camiseta', 'G', 'Vermelho', 24.90, 25, 3),
+            ('Camiseta Polo', 'Camiseta', 'M', 'Branco', 29.90, 15.00, 50, 5, 1),
+            ('Calça Jeans', 'Calça', '42', 'Azul', 89.90, 45.00, 30, 3, 1),
+            ('Agasalho', 'Agasalho', 'G', 'Verde', 129.90, 65.00, 20, 2, 2),
+            ('Short', 'Short', 'P', 'Preto', 39.90, 20.00, 40, 5, 2),
+            ('Camiseta Regata', 'Camiseta', 'G', 'Vermelho', 24.90, 12.00, 25, 5, 3),
+            ('Blusa Moletom', 'Agasalho', 'M', 'Cinza', 79.90, 35.00, 35, 4, 1),
+            ('Bermuda', 'Short', '38', 'Azul Marinho', 49.90, 22.00, 28, 3, 2),
         ]
         
-        for nome, categoria, tamanho, cor, preco, estoque, escola_id in produtos_padrao:
+        for nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id in produtos_padrao:
             cursor.execute('''
-                INSERT OR IGNORE INTO produtos (nome, categoria, tamanho, cor, preco, estoque, escola_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (nome, categoria, tamanho, cor, preco, estoque, escola_id))
+                INSERT OR IGNORE INTO produtos (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id))
         
         conn.commit()
         return True
@@ -306,7 +352,7 @@ def verificar_login(username, password):
             conn.close()
 
 # =========================================
-# 📊 FUNÇÕES DO SISTEMA
+# 📊 FUNÇÕES DO SISTEMA - OTIMIZADAS
 # =========================================
 
 def listar_usuarios():
@@ -375,7 +421,7 @@ def alterar_senha_usuario(username, nova_senha):
         if conn:
             conn.close()
 
-def adicionar_escola(nome, endereco, telefone):
+def adicionar_escola(nome, endereco, telefone, email):
     """Adiciona nova escola"""
     conn = get_connection()
     if not conn:
@@ -384,9 +430,9 @@ def adicionar_escola(nome, endereco, telefone):
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO escolas (nome, endereco, telefone)
-            VALUES (?, ?, ?)
-        ''', (nome, endereco, telefone))
+            INSERT INTO escolas (nome, endereco, telefone, email)
+            VALUES (?, ?, ?, ?)
+        ''', (nome, endereco, telefone, email))
         
         conn.commit()
         return True, "✅ Escola cadastrada com sucesso!"
@@ -398,7 +444,7 @@ def adicionar_escola(nome, endereco, telefone):
         if conn:
             conn.close()
 
-def editar_escola(escola_id, nome, endereco, telefone):
+def editar_escola(escola_id, nome, endereco, telefone, email):
     """Edita escola existente"""
     conn = get_connection()
     if not conn:
@@ -408,9 +454,9 @@ def editar_escola(escola_id, nome, endereco, telefone):
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE escolas 
-            SET nome = ?, endereco = ?, telefone = ?
+            SET nome = ?, endereco = ?, telefone = ?, email = ?
             WHERE id = ?
-        ''', (nome, endereco, telefone, escola_id))
+        ''', (nome, endereco, telefone, email, escola_id))
         
         conn.commit()
         return True, "✅ Escola atualizada com sucesso!"
@@ -445,7 +491,7 @@ def excluir_escola(escola_id):
         if conn:
             conn.close()
 
-def adicionar_cliente(nome, telefone, email):
+def adicionar_cliente(nome, telefone, email, data_nascimento=None, cpf=None, endereco=None):
     """Adiciona cliente SEM vínculo com escola"""
     conn = get_connection()
     if not conn:
@@ -454,8 +500,8 @@ def adicionar_cliente(nome, telefone, email):
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?, ?)",
-            (nome, telefone, email)
+            "INSERT INTO clientes (nome, telefone, email, data_nascimento, cpf, endereco) VALUES (?, ?, ?, ?, ?, ?)",
+            (nome, telefone, email, data_nascimento, cpf, endereco)
         )
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
@@ -465,19 +511,54 @@ def adicionar_cliente(nome, telefone, email):
         if conn:
             conn.close()
 
-def listar_clientes():
-    """Lista todos os clientes"""
+def listar_clientes_paginado(offset=0, limit=50, busca=None):
+    """Lista clientes com paginação"""
     conn = get_connection()
     if not conn:
         return []
     
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM clientes ORDER BY nome')
+        if busca:
+            cursor.execute('''
+                SELECT * FROM clientes 
+                WHERE nome LIKE ? OR telefone LIKE ? OR email LIKE ?
+                ORDER BY nome
+                LIMIT ? OFFSET ?
+            ''', (f'%{busca}%', f'%{busca}%', f'%{busca}%', limit, offset))
+        else:
+            cursor.execute('''
+                SELECT * FROM clientes 
+                ORDER BY nome
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
         return cursor.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar clientes: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+def contar_clientes(busca=None):
+    """Conta total de clientes para paginação"""
+    conn = get_connection()
+    if not conn:
+        return 0
+    
+    try:
+        cursor = conn.cursor()
+        if busca:
+            cursor.execute('''
+                SELECT COUNT(*) FROM clientes 
+                WHERE nome LIKE ? OR telefone LIKE ? OR email LIKE ?
+            ''', (f'%{busca}%', f'%{busca}%', f'%{busca}%'))
+        else:
+            cursor.execute('SELECT COUNT(*) FROM clientes')
+        return cursor.fetchone()[0]
+    except Exception as e:
+        st.error(f"Erro ao contar clientes: {e}")
+        return 0
     finally:
         if conn:
             conn.close()
@@ -504,7 +585,7 @@ def excluir_cliente(cliente_id):
         if conn:
             conn.close()
 
-def editar_cliente(cliente_id, nome, telefone, email):
+def editar_cliente(cliente_id, nome, telefone, email, data_nascimento=None, cpf=None, endereco=None):
     """Edita cliente existente"""
     conn = get_connection()
     if not conn:
@@ -514,9 +595,9 @@ def editar_cliente(cliente_id, nome, telefone, email):
         cursor = conn.cursor()
         cursor.execute('''
             UPDATE clientes 
-            SET nome = ?, telefone = ?, email = ?
+            SET nome = ?, telefone = ?, email = ?, data_nascimento = ?, cpf = ?, endereco = ?
             WHERE id = ?
-        ''', (nome, telefone, email, cliente_id))
+        ''', (nome, telefone, email, data_nascimento, cpf, endereco, cliente_id))
         
         conn.commit()
         return True, "✅ Cliente atualizado com sucesso!"
@@ -543,7 +624,7 @@ def produto_existe(nome, tamanho, cor, escola_id):
         if conn:
             conn.close()
 
-def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id):
+def adicionar_produto(nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -555,9 +636,9 @@ def adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id):
         
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, estoque, escola_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (nome, categoria, tamanho, cor, preco, estoque, escola_id))
+            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id))
         conn.commit()
         return True, "✅ Produto cadastrado com sucesso!"
     except Exception as e:
@@ -628,7 +709,7 @@ def atualizar_estoque(produto_id, nova_quantidade):
         if conn:
             conn.close()
 
-def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
+def adicionar_pedido(cliente_id, itens, data_entrega, observacoes, desconto=0, forma_pagamento=None, vendedor_id=None):
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -636,6 +717,7 @@ def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
     try:
         cursor = conn.cursor()
         valor_total = sum(item['subtotal'] for item in itens)
+        valor_final = valor_total - desconto
         
         # Validar data de entrega
         if isinstance(data_entrega, date):
@@ -652,9 +734,9 @@ def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
         
         # Inserir pedido
         cursor.execute('''
-            INSERT INTO pedidos (cliente_id, data_entrega_prevista, valor_total, observacoes)
-            VALUES (?, ?, ?, ?)
-        ''', (cliente_id, data_entrega_str, valor_total, observacoes))
+            INSERT INTO pedidos (cliente_id, data_entrega_prevista, valor_total, desconto, valor_final, observacoes, forma_pagamento, vendedor_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (cliente_id, data_entrega_str, valor_total, desconto, valor_final, observacoes, forma_pagamento, vendedor_id))
         
         pedido_id = cursor.lastrowid
         
@@ -679,8 +761,8 @@ def adicionar_pedido(cliente_id, itens, data_entrega, observacoes):
         if conn:
             conn.close()
 
-def listar_pedidos(usuario_tipo):
-    """Lista pedidos - cliente NÃO tem mais escola"""
+def listar_pedidos_paginado(usuario_tipo, offset=0, limit=50, filtro_status=None, busca_cliente=None):
+    """Lista pedidos com paginação"""
     conn = get_connection()
     if not conn:
         return []
@@ -688,17 +770,68 @@ def listar_pedidos(usuario_tipo):
     try:
         cursor = conn.cursor()
         
-        cursor.execute('''
+        query = '''
             SELECT p.*, c.nome as cliente_nome
             FROM pedidos p
             JOIN clientes c ON p.cliente_id = c.id
-            ORDER BY p.data_pedido DESC
-        ''')
+        '''
+        params = []
         
+        where_conditions = []
+        
+        if filtro_status and filtro_status != "Todos":
+            where_conditions.append("p.status = ?")
+            params.append(filtro_status)
+            
+        if busca_cliente:
+            where_conditions.append("c.nome LIKE ?")
+            params.append(f'%{busca_cliente}%')
+        
+        if where_conditions:
+            query += " WHERE " + " AND ".join(where_conditions)
+        
+        query += " ORDER BY p.data_pedido DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, params)
         return cursor.fetchall()
     except Exception as e:
         st.error(f"Erro ao listar pedidos: {e}")
         return []
+    finally:
+        if conn:
+            conn.close()
+
+def contar_pedidos(filtro_status=None, busca_cliente=None):
+    """Conta total de pedidos para paginação"""
+    conn = get_connection()
+    if not conn:
+        return 0
+    
+    try:
+        cursor = conn.cursor()
+        
+        query = "SELECT COUNT(*) FROM pedidos p JOIN clientes c ON p.cliente_id = c.id"
+        params = []
+        
+        where_conditions = []
+        
+        if filtro_status and filtro_status != "Todos":
+            where_conditions.append("p.status = ?")
+            params.append(filtro_status)
+            
+        if busca_cliente:
+            where_conditions.append("c.nome LIKE ?")
+            params.append(f'%{busca_cliente}%')
+        
+        if where_conditions:
+            query += " WHERE " + " AND ".join(where_conditions)
+        
+        cursor.execute(query, params)
+        return cursor.fetchone()[0]
+    except Exception as e:
+        st.error(f"Erro ao contar pedidos: {e}")
+        return 0
     finally:
         if conn:
             conn.close()
@@ -774,9 +907,11 @@ def obter_detalhes_pedido(pedido_id):
         
         # Buscar informações do pedido
         cursor.execute('''
-            SELECT p.*, c.nome as cliente_nome, c.telefone, c.email
+            SELECT p.*, c.nome as cliente_nome, c.telefone, c.email, c.endereco,
+                   u.nome_completo as vendedor_nome
             FROM pedidos p
             JOIN clientes c ON p.cliente_id = c.id
+            LEFT JOIN usuarios u ON p.vendedor_id = u.id
             WHERE p.id = ?
         ''', (pedido_id,))
         
@@ -825,6 +960,9 @@ def exportar_pedidos_para_csv():
                 p.data_entrega_prevista,
                 p.data_entrega_real,
                 p.valor_total,
+                p.desconto,
+                p.valor_final,
+                p.forma_pagamento,
                 GROUP_CONCAT(pr.nome || ' (' || pi.quantidade || 'x)') as itens
             FROM pedidos p
             JOIN clientes c ON p.cliente_id = c.id
@@ -845,7 +983,7 @@ def exportar_pedidos_para_csv():
         
         # Cabeçalho
         writer.writerow(['ID', 'Cliente', 'Status', 'Data Pedido', 'Entrega Prevista', 
-                        'Entrega Real', 'Valor Total', 'Itens'])
+                        'Entrega Real', 'Valor Total', 'Desconto', 'Valor Final', 'Pagamento', 'Itens'])
         
         # Dados
         for pedido in pedidos:
@@ -857,6 +995,9 @@ def exportar_pedidos_para_csv():
                 formatar_data_brasil(pedido['data_entrega_prevista']),
                 formatar_data_brasil(pedido['data_entrega_real']),
                 f"R$ {pedido['valor_total']:.2f}",
+                f"R$ {pedido['desconto']:.2f}",
+                f"R$ {pedido['valor_final']:.2f}",
+                pedido['forma_pagamento'] or 'N/A',
                 pedido['itens']
             ])
         
@@ -870,7 +1011,278 @@ def exportar_pedidos_para_csv():
             conn.close()
 
 # =========================================
-# 🤖 SISTEMA DE A.I. E ANÁLISES (SEM PLOTLY)
+# 📊 RELATÓRIOS POR ESCOLA
+# =========================================
+
+def relatorio_vendas_por_escola(data_inicio=None, data_fim=None):
+    """Gera relatório de vendas por escola"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        
+        query = '''
+            SELECT 
+                e.id,
+                e.nome as escola_nome,
+                COUNT(DISTINCT p.id) as total_pedidos,
+                SUM(p.valor_final) as valor_total_vendas,
+                SUM(pi.quantidade) as total_itens_vendidos,
+                AVG(p.valor_final) as ticket_medio
+            FROM escolas e
+            LEFT JOIN produtos pr ON e.id = pr.escola_id
+            LEFT JOIN pedido_itens pi ON pr.id = pi.produto_id
+            LEFT JOIN pedidos p ON pi.pedido_id = p.id
+        '''
+        
+        params = []
+        
+        if data_inicio and data_fim:
+            query += " WHERE p.data_pedido BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
+        
+        query += '''
+            GROUP BY e.id
+            ORDER BY valor_total_vendas DESC
+        '''
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+        
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def relatorio_produtos_por_escola(escola_id, data_inicio=None, data_fim=None):
+    """Gera relatório de produtos por escola específica"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        
+        query = '''
+            SELECT 
+                pr.nome,
+                pr.categoria,
+                pr.tamanho,
+                pr.cor,
+                SUM(pi.quantidade) as total_vendido,
+                SUM(pi.subtotal) as valor_total,
+                pr.estoque,
+                pr.preco
+            FROM produtos pr
+            LEFT JOIN pedido_itens pi ON pr.id = pi.produto_id
+            LEFT JOIN pedidos p ON pi.pedido_id = p.id
+            WHERE pr.escola_id = ?
+        '''
+        
+        params = [escola_id]
+        
+        if data_inicio and data_fim:
+            query += " AND p.data_pedido BETWEEN ? AND ?"
+            params.extend([data_inicio, data_fim])
+        
+        query += '''
+            GROUP BY pr.id
+            ORDER BY total_vendido DESC
+        '''
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+        
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def relatorio_estoque_por_escola():
+    """Gera relatório de estoque por escola"""
+    conn = get_connection()
+    if not conn:
+        return []
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                e.id,
+                e.nome as escola_nome,
+                COUNT(pr.id) as total_produtos,
+                SUM(pr.estoque) as total_estoque,
+                SUM(CASE WHEN pr.estoque <= pr.estoque_minimo THEN 1 ELSE 0 END) as produtos_estoque_baixo,
+                SUM(pr.estoque * pr.preco) as valor_total_estoque
+            FROM escolas e
+            LEFT JOIN produtos pr ON e.id = pr.escola_id
+            WHERE pr.ativo = 1 OR pr.ativo IS NULL
+            GROUP BY e.id
+            ORDER BY valor_total_estoque DESC
+        ''')
+        
+        return cursor.fetchall()
+        
+    except Exception as e:
+        st.error(f"Erro ao gerar relatório de estoque: {e}")
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+# =========================================
+# 🧾 GERADOR DE PDF
+# =========================================
+
+def gerar_pdf_pedido(pedido_id):
+    """Gera PDF do pedido"""
+    detalhes = obter_detalhes_pedido(pedido_id)
+    if not detalhes:
+        return None
+    
+    try:
+        # Criar buffer para o PDF
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=1*inch)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Estilo personalizado
+        estilo_titulo = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1  # Centralizado
+        )
+        
+        estilo_normal = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=10,
+            spaceAfter=6
+        )
+        
+        # Título
+        titulo = Paragraph(f"PEDIDO #{pedido_id}", estilo_titulo)
+        elements.append(titulo)
+        elements.append(Spacer(1, 20))
+        
+        # Informações do pedido
+        pedido = detalhes['pedido']
+        info_pedido = [
+            [Paragraph("<b>Data do Pedido:</b>", estilo_normal), Paragraph(formatar_datahora_brasil(pedido['data_pedido']), estilo_normal)],
+            [Paragraph("<b>Status:</b>", estilo_normal), Paragraph(pedido['status'], estilo_normal)],
+            [Paragraph("<b>Cliente:</b>", estilo_normal), Paragraph(pedido['cliente_nome'], estilo_normal)],
+            [Paragraph("<b>Telefone:</b>", estilo_normal), Paragraph(pedido['telefone'] or 'N/A', estilo_normal)],
+            [Paragraph("<b>Email:</b>", estilo_normal), Paragraph(pedido['email'] or 'N/A', estilo_normal)],
+            [Paragraph("<b>Endereço:</b>", estilo_normal), Paragraph(pedido['endereco'] or 'N/A', estilo_normal)],
+            [Paragraph("<b>Entrega Prevista:</b>", estilo_normal), Paragraph(formatar_data_brasil(pedido['data_entrega_prevista']), estilo_normal)],
+            [Paragraph("<b>Forma de Pagamento:</b>", estilo_normal), Paragraph(pedido['forma_pagamento'] or 'N/A', estilo_normal)],
+        ]
+        
+        if pedido['vendedor_nome']:
+            info_pedido.append([Paragraph("<b>Vendedor:</b>", estilo_normal), Paragraph(pedido['vendedor_nome'], estilo_normal)])
+        
+        tabela_info = Table(info_pedido, colWidths=[2*inch, 4*inch])
+        tabela_info.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        
+        elements.append(tabela_info)
+        elements.append(Spacer(1, 20))
+        
+        # Itens do pedido
+        elements.append(Paragraph("<b>ITENS DO PEDIDO</b>", styles['Heading2']))
+        elements.append(Spacer(1, 10))
+        
+        dados_itens = [['Produto', 'Escola', 'Tamanho', 'Cor', 'Qtd', 'Preço Unit.', 'Subtotal']]
+        
+        for item in detalhes['itens']:
+            dados_itens.append([
+                item['produto_nome'],
+                item['escola_nome'],
+                item['tamanho'],
+                item['cor'],
+                str(item['quantidade']),
+                f"R$ {item['preco_unitario']:.2f}",
+                f"R$ {item['subtotal']:.2f}"
+            ])
+        
+        tabela_itens = Table(dados_itens, colWidths=[1.5*inch, 1.2*inch, 0.6*inch, 0.7*inch, 0.5*inch, 0.8*inch, 0.8*inch])
+        tabela_itens.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 7),
+            ('ALIGN', (4, 1), (6, -1), 'RIGHT'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        elements.append(tabela_itens)
+        elements.append(Spacer(1, 20))
+        
+        # Totais
+        elementos_totais = [
+            [Paragraph("<b>Valor Total:</b>", estilo_normal), Paragraph(f"R$ {pedido['valor_total']:.2f}", estilo_normal)],
+            [Paragraph("<b>Desconto:</b>", estilo_normal), Paragraph(f"R$ {pedido['desconto']:.2f}", estilo_normal)],
+            [Paragraph("<b>VALOR FINAL:</b>", styles['Heading2']), Paragraph(f"<b>R$ {pedido['valor_final']:.2f}</b>", styles['Heading2'])]
+        ]
+        
+        tabela_totais = Table(elementos_totais, colWidths=[2*inch, 2*inch])
+        tabela_totais.setStyle(TableStyle([
+            ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+            ('FONTSIZE', (0, 2), (-1, 2), 12),
+            ('BOTTOMPADDING', (0, 2), (-1, 2), 12),
+        ]))
+        
+        elements.append(tabela_totais)
+        
+        # Observações
+        if pedido['observacoes']:
+            elements.append(Spacer(1, 20))
+            elements.append(Paragraph("<b>Observações:</b>", styles['Heading2']))
+            elements.append(Paragraph(pedido['observacoes'], estilo_normal))
+        
+        # Rodapé
+        elements.append(Spacer(1, 30))
+        elements.append(Paragraph(f"Emitido em: {data_atual_brasil()} às {hora_atual_brasil()}", styles['Normal']))
+        
+        # Gerar PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer
+        
+    except Exception as e:
+        st.error(f"Erro ao gerar PDF: {e}")
+        return None
+
+def criar_botao_download_pdf(pedido_id, texto="📄 Gerar PDF"):
+    """Cria botão para download do PDF"""
+    pdf_buffer = gerar_pdf_pedido(pedido_id)
+    if pdf_buffer:
+        b64 = base64.b64encode(pdf_buffer.getvalue()).decode()
+        href = f'<a href="data:application/pdf;base64,{b64}" download="pedido_{pedido_id}.pdf" style="background-color: #4CAF50; color: white; padding: 8px 16px; text-align: center; text-decoration: none; display: inline-block; border-radius: 4px; border: none;">{texto}</a>'
+        st.markdown(href, unsafe_allow_html=True)
+    else:
+        st.error("Erro ao gerar PDF")
+
+# =========================================
+# 🤖 SISTEMA DE A.I. E ANÁLISES
 # =========================================
 
 def gerar_metricas_avancadas():
@@ -999,13 +1411,13 @@ def analise_estoque_otimizacao():
     insights = []
     
     # Produtos com estoque baixo
-    estoque_baixo = [p for p in produtos if p['estoque'] < 5]
+    estoque_baixo = [p for p in produtos if p['estoque'] < p['estoque_minimo']]
     if estoque_baixo:
         insights.append({
             'tipo': 'danger',
             'titulo': '🚨 Estoque Crítico',
-            'mensagem': f'{len(estoque_baixo)} produtos com estoque abaixo de 5 unidades',
-            'detalhes': [f"{p['nome']} - {p['tamanho']} ({p['estoque']} unidades)" for p in estoque_baixo[:3]]
+            'mensagem': f'{len(estoque_baixo)} produtos com estoque abaixo do mínimo',
+            'detalhes': [f"{p['nome']} - {p['tamanho']} ({p['estoque']}/{p['estoque_minimo']})" for p in estoque_baixo[:3]]
         })
     
     # Produtos mais vendidos que precisam de reposição
@@ -1120,12 +1532,12 @@ def gerar_relatorio_ai():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            total_clientes = len(listar_clientes())
+            total_clientes = contar_clientes()
             st.metric("Total Clientes", total_clientes)
         
         with col2:
-            total_pedidos = len(listar_pedidos('admin'))
-            st.metric("Total Pedidos", len(listar_pedidos('admin')))
+            total_pedidos = contar_pedidos()
+            st.metric("Total Pedidos", total_pedidos)
         
         with col3:
             produtos = listar_produtos()
@@ -1133,7 +1545,9 @@ def gerar_relatorio_ai():
             st.metric("Estoque Total", estoque_total)
         
         with col4:
-            vendas_totais = sum(p['valor_total'] for p in listar_pedidos('admin'))
+            cursor = get_connection().cursor()
+            cursor.execute("SELECT SUM(valor_final) FROM pedidos WHERE status = 'Entregue'")
+            vendas_totais = cursor.fetchone()[0] or 0
             st.metric("Vendas Totais", f"R$ {vendas_totais:.2f}")
         
         st.markdown("---")
@@ -1241,8 +1655,8 @@ def interface_admin():
     """Interface para Administrador"""
     st.header("👑 Painel do Administrador")
     
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Dashboard", "🤖 A.I. Insights", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "🏫 Escolas", "👤 Usuários"
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "📊 Dashboard", "🤖 A.I. Insights", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "🏫 Escolas", "👤 Usuários", "📈 Relatórios"
     ])
     
     with tab1:
@@ -1251,19 +1665,19 @@ def interface_admin():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            clientes = listar_clientes()
-            st.metric("Total Clientes", len(clientes))
+            total_clientes = contar_clientes()
+            st.metric("Total Clientes", total_clientes)
         
         with col2:
             produtos = listar_produtos()
             st.metric("Total Produtos", len(produtos))
         
         with col3:
-            pedidos = listar_pedidos('admin')
-            st.metric("Total Pedidos", len(pedidos))
+            total_pedidos = contar_pedidos()
+            st.metric("Total Pedidos", total_pedidos)
         
         with col4:
-            estoque_baixo = len([p for p in produtos if p['estoque'] < 5])
+            estoque_baixo = len([p for p in produtos if p['estoque'] < p['estoque_minimo']])
             st.metric("Alerta Estoque", estoque_baixo)
         
         # Data e hora atual
@@ -1296,10 +1710,13 @@ def interface_admin():
                 nome = st.text_input("Nome completo*")
                 telefone = st.text_input("Telefone*")
                 email = st.text_input("Email")
+                data_nascimento = st.date_input("Data de Nascimento", max_value=date.today())
+                cpf = st.text_input("CPF")
+                endereco = st.text_area("Endereço")
                 
                 if st.form_submit_button("✅ Cadastrar Cliente"):
                     if nome and telefone:
-                        sucesso, msg = adicionar_cliente(nome, telefone, email)
+                        sucesso, msg = adicionar_cliente(nome, telefone, email, data_nascimento, cpf, endereco)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
@@ -1310,7 +1727,39 @@ def interface_admin():
         
         with col2:
             st.write("📋 Clientes Cadastrados")
-            clientes = listar_clientes()
+            
+            # Busca e paginação
+            col_search, col_filter = st.columns([2, 1])
+            with col_search:
+                busca_cliente = st.text_input("🔍 Buscar cliente", placeholder="Nome, telefone ou email")
+            with col_filter:
+                limite_clientes = st.selectbox("Itens por página", [25, 50, 100], index=1)
+            
+            # Paginação
+            if 'pagina_clientes' not in st.session_state:
+                st.session_state.pagina_clientes = 0
+            
+            total_clientes = contar_clientes(busca_cliente)
+            total_paginas = max(1, (total_clientes + limite_clientes - 1) // limite_clientes)
+            
+            clientes = listar_clientes_paginado(
+                offset=st.session_state.pagina_clientes * limite_clientes,
+                limit=limite_clientes,
+                busca=busca_cliente
+            )
+            
+            # Controles de paginação
+            col_prev, col_info, col_next = st.columns([1, 2, 1])
+            with col_prev:
+                if st.button("⬅️ Anterior", disabled=st.session_state.pagina_clientes == 0):
+                    st.session_state.pagina_clientes -= 1
+                    st.rerun()
+            with col_info:
+                st.write(f"Página {st.session_state.pagina_clientes + 1} de {total_paginas} ({total_clientes} clientes)")
+            with col_next:
+                if st.button("Próxima ➡️", disabled=st.session_state.pagina_clientes >= total_paginas - 1):
+                    st.session_state.pagina_clientes += 1
+                    st.rerun()
             
             for cliente in clientes:
                 with st.expander(f"👤 {cliente['nome']}", expanded=False):
@@ -1318,8 +1767,12 @@ def interface_admin():
                     with col_a:
                         st.write(f"**Telefone:** {cliente['telefone'] or 'N/A'}")
                         st.write(f"**Email:** {cliente['email'] or 'N/A'}")
+                        if cliente['data_nascimento']:
+                            st.write(f"**Nascimento:** {formatar_data_brasil(cliente['data_nascimento'])}")
                     with col_b:
-                        st.write(f"**Data Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
+                        st.write(f"**CPF:** {cliente['cpf'] or 'N/A'}")
+                        st.write(f"**Endereço:** {cliente['endereco'] or 'N/A'}")
+                        st.write(f"**Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
                     
                     col_c, col_d = st.columns(2)
                     with col_c:
@@ -1331,9 +1784,14 @@ def interface_admin():
                                 novo_nome = st.text_input("Nome", value=cliente['nome'])
                                 novo_telefone = st.text_input("Telefone", value=cliente['telefone'] or "")
                                 novo_email = st.text_input("Email", value=cliente['email'] or "")
+                                novo_cpf = st.text_input("CPF", value=cliente['cpf'] or "")
+                                novo_endereco = st.text_area("Endereço", value=cliente['endereco'] or "")
                                 
                                 if st.form_submit_button("💾 Salvar"):
-                                    sucesso, msg = editar_cliente(cliente['id'], novo_nome, novo_telefone, novo_email)
+                                    sucesso, msg = editar_cliente(
+                                        cliente['id'], novo_nome, novo_telefone, novo_email,
+                                        cliente['data_nascimento'], novo_cpf, novo_endereco
+                                    )
                                     if sucesso:
                                         st.success(msg)
                                         st.session_state[f'edit_cliente_{cliente["id"]}'] = False
@@ -1359,11 +1817,13 @@ def interface_admin():
             st.write("➕ Novo Produto")
             with st.form("novo_produto_admin", clear_on_submit=True):
                 nome = st.text_input("Nome do produto*")
-                categoria = st.selectbox("Categoria", ["Camiseta", "Calça", "Short", "Agasalho", "Acessório"])
-                tamanho = st.selectbox("Tamanho", ["PP", "P", "M", "G", "GG", "2", "4", "6", "8", "10", "12"])
+                categoria = st.selectbox("Categoria", ["Camiseta", "Calça", "Short", "Agasalho", "Acessório", "Uniforme"])
+                tamanho = st.selectbox("Tamanho", ["PP", "P", "M", "G", "GG", "Único", "2", "4", "6", "8", "10", "12", "14", "16"])
                 cor = st.text_input("Cor*", value="Branco")
-                preco = st.number_input("Preço R$*", min_value=0.0, value=29.90)
+                preco = st.number_input("Preço Venda R$*", min_value=0.0, value=29.90, step=0.1)
+                custo = st.number_input("Custo R$*", min_value=0.0, value=15.00, step=0.1)
                 estoque = st.number_input("Estoque*", min_value=0, value=10)
+                estoque_minimo = st.number_input("Estoque Mínimo*", min_value=1, value=5)
                 
                 escolas = listar_escolas()
                 escola_id = st.selectbox("Escola*", 
@@ -1372,7 +1832,7 @@ def interface_admin():
                 
                 if st.form_submit_button("✅ Cadastrar Produto"):
                     if nome and cor and escola_id:
-                        sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, estoque, escola_id)
+                        sucesso, msg = adicionar_produto(nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
@@ -1390,9 +1850,10 @@ def interface_admin():
                     produtos_escola = listar_produtos(escola['id'])
                     
                     for produto in produtos_escola:
-                        col_a, col_b, col_c = st.columns([3, 1, 1])
+                        col_a, col_b, col_c, col_d = st.columns([3, 1, 1, 1])
                         with col_a:
-                            st.write(f"👕 **{produto['nome']}** - {produto['tamanho']} - {produto['cor']}")
+                            st.write(f"👕 **{produto['nome']}**")
+                            st.write(f"{produto['tamanho']} - {produto['cor']}")
                         with col_b:
                             # Editar estoque
                             novo_estoque = st.number_input(
@@ -1411,7 +1872,16 @@ def interface_admin():
                                     else:
                                         st.error(msg)
                         with col_c:
+                            margem = ((produto['preco'] - produto['custo']) / produto['custo']) * 100
                             st.write(f"R$ {produto['preco']:.2f}")
+                            st.write(f"Lucro: {margem:.1f}%")
+                        with col_d:
+                            if produto['estoque'] <= produto['estoque_minimo']:
+                                st.error("⬇️ Baixo")
+                            elif produto['estoque'] <= produto['estoque_minimo'] * 2:
+                                st.warning("⚠️ Atenção")
+                            else:
+                                st.success("✅ OK")
     
     with tab5:
         interface_pedidos('admin')
@@ -1441,10 +1911,11 @@ def interface_admin():
                 nome = st.text_input("Nome da Escola*")
                 endereco = st.text_input("Endereço")
                 telefone = st.text_input("Telefone")
+                email = st.text_input("Email")
                 
                 if st.form_submit_button("✅ Cadastrar Escola"):
                     if nome:
-                        sucesso, msg = adicionar_escola(nome, endereco, telefone)
+                        sucesso, msg = adicionar_escola(nome, endereco, telefone, email)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
@@ -1461,6 +1932,8 @@ def interface_admin():
                 with st.expander(f"🏫 {escola['nome']}"):
                     st.write(f"**Endereço:** {escola['endereco']}")
                     st.write(f"**Telefone:** {escola['telefone']}")
+                    st.write(f"**Email:** {escola['email']}")
+                    st.write(f"**Cadastro:** {formatar_data_brasil(escola['data_cadastro'])}")
                     
                     col_a, col_b = st.columns(2)
                     with col_a:
@@ -1481,11 +1954,12 @@ def interface_admin():
                             novo_nome = st.text_input("Nome", value=escola['nome'])
                             novo_endereco = st.text_input("Endereço", value=escola['endereco'] or "")
                             novo_telefone = st.text_input("Telefone", value=escola['telefone'] or "")
+                            novo_email = st.text_input("Email", value=escola['email'] or "")
                             
                             col_c, col_d = st.columns(2)
                             with col_c:
                                 if st.form_submit_button("💾 Salvar"):
-                                    sucesso, msg = editar_escola(escola['id'], novo_nome, novo_endereco, novo_telefone)
+                                    sucesso, msg = editar_escola(escola['id'], novo_nome, novo_endereco, novo_telefone, novo_email)
                                     if sucesso:
                                         st.success(msg)
                                         del st.session_state.editando_escola
@@ -1542,13 +2016,164 @@ def interface_admin():
                                     st.error(msg)
                             else:
                                 st.error("❌ Digite uma nova senha")
+    
+    with tab8:
+        st.subheader("📈 Relatórios por Escola")
+        
+        tab_rel1, tab_rel2, tab_rel3 = st.tabs(["📊 Vendas por Escola", "📦 Estoque por Escola", "👕 Produtos por Escola"])
+        
+        with tab_rel1:
+            st.subheader("📊 Relatório de Vendas por Escola")
+            
+            col_periodo1, col_periodo2 = st.columns(2)
+            with col_periodo1:
+                data_inicio = st.date_input("Data Início", value=date.today() - timedelta(days=30))
+            with col_periodo2:
+                data_fim = st.date_input("Data Fim", value=date.today())
+            
+            if st.button("🔄 Gerar Relatório"):
+                with st.spinner("Gerando relatório..."):
+                    relatorio = relatorio_vendas_por_escola(data_inicio, data_fim)
+                    
+                    if relatorio:
+                        st.success(f"📊 Relatório gerado com sucesso! ({len(relatorio)} escolas)")
+                        
+                        # Métricas totais
+                        total_vendas = sum(r['valor_total_vendas'] or 0 for r in relatorio)
+                        total_pedidos = sum(r['total_pedidos'] or 0 for r in relatorio)
+                        
+                        col_met1, col_met2, col_met3 = st.columns(3)
+                        with col_met1:
+                            st.metric("Total de Vendas", f"R$ {total_vendas:.2f}")
+                        with col_met2:
+                            st.metric("Total de Pedidos", total_pedidos)
+                        with col_met3:
+                            st.metric("Escolas no Relatório", len(relatorio))
+                        
+                        # Tabela de resultados
+                        st.subheader("🏫 Desempenho por Escola")
+                        for escola in relatorio:
+                            with st.expander(f"🏫 {escola['escola_nome']} - R$ {escola['valor_total_vendas'] or 0:.2f}"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total de Pedidos", escola['total_pedidos'] or 0)
+                                with col2:
+                                    st.metric("Valor Total", f"R$ {escola['valor_total_vendas'] or 0:.2f}")
+                                with col3:
+                                    st.metric("Itens Vendidos", escola['total_itens_vendidos'] or 0)
+                                with col4:
+                                    st.metric("Ticket Médio", f"R$ {escola['ticket_medio'] or 0:.2f}")
+                    else:
+                        st.warning("❌ Nenhum dado encontrado para o período selecionado.")
+        
+        with tab_rel2:
+            st.subheader("📦 Relatório de Estoque por Escola")
+            
+            if st.button("🔄 Gerar Relatório de Estoque"):
+                with st.spinner("Gerando relatório de estoque..."):
+                    relatorio = relatorio_estoque_por_escola()
+                    
+                    if relatorio:
+                        st.success(f"📦 Relatório gerado com sucesso! ({len(relatorio)} escolas)")
+                        
+                        # Métricas totais
+                        total_estoque = sum(r['total_estoque'] or 0 for r in relatorio)
+                        total_valor_estoque = sum(r['valor_total_estoque'] or 0 for r in relatorio)
+                        total_produtos_baixo = sum(r['produtos_estoque_baixo'] or 0 for r in relatorio)
+                        
+                        col_met1, col_met2, col_met3 = st.columns(3)
+                        with col_met1:
+                            st.metric("Total em Estoque", total_estoque)
+                        with col_met2:
+                            st.metric("Valor do Estoque", f"R$ {total_valor_estoque:.2f}")
+                        with col_met3:
+                            st.metric("Produtos com Estoque Baixo", total_produtos_baixo)
+                        
+                        # Tabela de resultados
+                        st.subheader("📊 Estoque por Escola")
+                        for escola in relatorio:
+                            cor_status = "✅" if (escola['produtos_estoque_baixo'] or 0) == 0 else "⚠️" if (escola['produtos_estoque_baixo'] or 0) < 5 else "❌"
+                            
+                            with st.expander(f"{cor_status} {escola['escola_nome']} - {escola['total_estoque'] or 0} itens"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Total Produtos", escola['total_produtos'] or 0)
+                                with col2:
+                                    st.metric("Total Estoque", escola['total_estoque'] or 0)
+                                with col3:
+                                    st.metric("Estoque Baixo", escola['produtos_estoque_baixo'] or 0)
+                                with col4:
+                                    st.metric("Valor Estoque", f"R$ {escola['valor_total_estoque'] or 0:.2f}")
+                    else:
+                        st.warning("❌ Nenhum dado encontrado.")
+        
+        with tab_rel3:
+            st.subheader("👕 Relatório de Produtos por Escola")
+            
+            escolas = listar_escolas()
+            escola_selecionada = st.selectbox(
+                "Selecione a Escola:",
+                options=[e['id'] for e in escolas],
+                format_func=lambda x: next(e['nome'] for e in escolas if e['id'] == x)
+            )
+            
+            col_periodo1, col_periodo2 = st.columns(2)
+            with col_periodo1:
+                data_inicio_prod = st.date_input("Data Início", value=date.today() - timedelta(days=30), key="prod_inicio")
+            with col_periodo2:
+                data_fim_prod = st.date_input("Data Fim", value=date.today(), key="prod_fim")
+            
+            if st.button("🔄 Gerar Relatório de Produtos"):
+                with st.spinner("Gerando relatório de produtos..."):
+                    relatorio = relatorio_produtos_por_escola(escola_selecionada, data_inicio_prod, data_fim_prod)
+                    
+                    if relatorio:
+                        escola_nome = next(e['nome'] for e in escolas if e['id'] == escola_selecionada)
+                        st.success(f"👕 Relatório gerado para {escola_nome}! ({len(relatorio)} produtos)")
+                        
+                        # Métricas
+                        total_vendido = sum(r['total_vendido'] or 0 for r in relatorio)
+                        valor_total = sum(r['valor_total'] or 0 for r in relatorio)
+                        
+                        col_met1, col_met2 = st.columns(2)
+                        with col_met1:
+                            st.metric("Total Itens Vendidos", total_vendido)
+                        with col_met2:
+                            st.metric("Valor Total Vendido", f"R$ {valor_total:.2f}")
+                        
+                        # Produtos mais vendidos
+                        st.subheader("🏆 Produtos Mais Vendidos")
+                        produtos_ordenados = sorted(relatorio, key=lambda x: x['total_vendido'] or 0, reverse=True)
+                        
+                        for i, produto in enumerate(produtos_ordenados[:10], 1):
+                            with st.expander(f"{i}. {produto['nome']} - {produto['total_vendido'] or 0} vendidos"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.write(f"**Categoria:** {produto['categoria']}")
+                                    st.write(f"**Tamanho:** {produto['tamanho']}")
+                                with col2:
+                                    st.write(f"**Cor:** {produto['cor']}")
+                                    st.write(f"**Preço:** R$ {produto['preco']:.2f}")
+                                with col3:
+                                    st.write(f"**Total Vendido:** {produto['total_vendido'] or 0}")
+                                    st.write(f"**Valor Total:** R$ {produto['valor_total'] or 0:.2f}")
+                                with col4:
+                                    st.write(f"**Estoque Atual:** {produto['estoque']}")
+                                    if produto['estoque'] <= 5:
+                                        st.error("Estoque Baixo")
+                                    elif produto['estoque'] <= 10:
+                                        st.warning("Estoque Médio")
+                                    else:
+                                        st.success("Estoque OK")
+                    else:
+                        st.warning("❌ Nenhum dado encontrado para esta escola no período selecionado.")
 
 def interface_gestor():
     """Interface para Gestor"""
     st.header("📈 Painel do Gestor")
     
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Dashboard", "🤖 A.I. Insights", "👥 Clientes", "👕 Produtos", "📦 Pedidos"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊 Dashboard", "🤖 A.I. Insights", "👥 Clientes", "👕 Produtos", "📦 Pedidos", "📈 Relatórios"
     ])
     
     with tab1:
@@ -1557,13 +2182,12 @@ def interface_gestor():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            clientes = listar_clientes()
-            st.metric("Clientes Ativos", len(clientes))
+            total_clientes = contar_clientes()
+            st.metric("Clientes Ativos", total_clientes)
         
         with col2:
-            pedidos = listar_pedidos('gestor')
-            pedidos_hoje = len([p for p in pedidos if p['data_pedido'][:10] == str(date.today())])
-            st.metric("Pedidos Hoje", pedidos_hoje)
+            pedidos_hoje = contar_pedidos()
+            st.metric("Total Pedidos", pedidos_hoje)
         
         with col3:
             produtos = listar_produtos()
@@ -1571,7 +2195,9 @@ def interface_gestor():
             st.metric("Estoque Total", estoque_total)
         
         with col4:
-            vendas_totais = sum(p['valor_total'] for p in pedidos)
+            cursor = get_connection().cursor()
+            cursor.execute("SELECT SUM(valor_final) FROM pedidos WHERE status = 'Entregue'")
+            vendas_totais = cursor.fetchone()[0] or 0
             st.metric("Vendas Totais", f"R$ {vendas_totais:.2f}")
         
         # Data e hora atual
@@ -1596,11 +2222,47 @@ def interface_gestor():
     with tab3:
         st.subheader("👥 Clientes")
         
-        clientes = listar_clientes()
+        # Busca e paginação
+        col_search, col_filter = st.columns([2, 1])
+        with col_search:
+            busca_cliente = st.text_input("🔍 Buscar cliente", placeholder="Nome, telefone ou email", key="busca_gestor")
+        with col_filter:
+            limite_clientes = st.selectbox("Itens por página", [25, 50, 100], index=1, key="limite_gestor")
+        
+        # Paginação
+        if 'pagina_clientes_gestor' not in st.session_state:
+            st.session_state.pagina_clientes_gestor = 0
+        
+        total_clientes = contar_clientes(busca_cliente)
+        total_paginas = max(1, (total_clientes + limite_clientes - 1) // limite_clientes)
+        
+        clientes = listar_clientes_paginado(
+            offset=st.session_state.pagina_clientes_gestor * limite_clientes,
+            limit=limite_clientes,
+            busca=busca_cliente
+        )
+        
+        # Controles de paginação
+        col_prev, col_info, col_next = st.columns([1, 2, 1])
+        with col_prev:
+            if st.button("⬅️ Anterior", disabled=st.session_state.pagina_clientes_gestor == 0, key="prev_gestor"):
+                st.session_state.pagina_clientes_gestor -= 1
+                st.rerun()
+        with col_info:
+            st.write(f"Página {st.session_state.pagina_clientes_gestor + 1} de {total_paginas} ({total_clientes} clientes)")
+        with col_next:
+            if st.button("Próxima ➡️", disabled=st.session_state.pagina_clientes_gestor >= total_paginas - 1, key="next_gestor"):
+                st.session_state.pagina_clientes_gestor += 1
+                st.rerun()
+        
         for cliente in clientes:
             with st.expander(f"👤 {cliente['nome']}"):
                 st.write(f"**Contato:** {cliente['telefone']} | {cliente['email']}")
+                if cliente['data_nascimento']:
+                    st.write(f"**Nascimento:** {formatar_data_brasil(cliente['data_nascimento'])}")
                 st.write(f"**Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
+                if cliente['endereco']:
+                    st.write(f"**Endereço:** {cliente['endereco']}")
     
     with tab4:
         st.subheader("👕 Produtos e Estoque")
@@ -1611,21 +2273,96 @@ def interface_gestor():
                 produtos_escola = listar_produtos(escola['id'])
                 
                 for produto in produtos_escola:
-                    col1, col2, col3 = st.columns([2, 1, 1])
+                    col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
                     with col1:
                         st.write(f"**{produto['nome']}** - {produto['tamanho']} - {produto['cor']}")
                     with col2:
-                        if produto['estoque'] < 5:
+                        if produto['estoque'] < produto['estoque_minimo']:
                             st.error(f"Estoque: {produto['estoque']}")
-                        elif produto['estoque'] < 10:
+                        elif produto['estoque'] < produto['estoque_minimo'] * 2:
                             st.warning(f"Estoque: {produto['estoque']}")
                         else:
                             st.success(f"Estoque: {produto['estoque']}")
                     with col3:
                         st.write(f"R$ {produto['preco']:.2f}")
+                    with col4:
+                        margem = ((produto['preco'] - produto['custo']) / produto['custo']) * 100
+                        st.write(f"Lucro: {margem:.1f}%")
     
     with tab5:
         interface_pedidos('gestor')
+    
+    with tab6:
+        st.subheader("📈 Relatórios por Escola")
+        
+        tab_rel1, tab_rel2 = st.tabs(["📊 Vendas por Escola", "📦 Estoque por Escola"])
+        
+        with tab_rel1:
+            st.subheader("📊 Relatório de Vendas por Escola")
+            
+            col_periodo1, col_periodo2 = st.columns(2)
+            with col_periodo1:
+                data_inicio = st.date_input("Data Início", value=date.today() - timedelta(days=30), key="gestor_inicio")
+            with col_periodo2:
+                data_fim = st.date_input("Data Fim", value=date.today(), key="gestor_fim")
+            
+            if st.button("🔄 Gerar Relatório", key="rel_gestor"):
+                with st.spinner("Gerando relatório..."):
+                    relatorio = relatorio_vendas_por_escola(data_inicio, data_fim)
+                    
+                    if relatorio:
+                        st.success(f"📊 Relatório gerado com sucesso! ({len(relatorio)} escolas)")
+                        
+                        total_vendas = sum(r['valor_total_vendas'] or 0 for r in relatorio)
+                        total_pedidos = sum(r['total_pedidos'] or 0 for r in relatorio)
+                        
+                        col_met1, col_met2, col_met3 = st.columns(3)
+                        with col_met1:
+                            st.metric("Total de Vendas", f"R$ {total_vendas:.2f}")
+                        with col_met2:
+                            st.metric("Total de Pedidos", total_pedidos)
+                        with col_met3:
+                            st.metric("Escolas", len(relatorio))
+                        
+                        for escola in relatorio:
+                            with st.expander(f"🏫 {escola['escola_nome']} - R$ {escola['valor_total_vendas'] or 0:.2f}"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Pedidos", escola['total_pedidos'] or 0)
+                                with col2:
+                                    st.metric("Vendas", f"R$ {escola['valor_total_vendas'] or 0:.2f}")
+                                with col3:
+                                    st.metric("Itens", escola['total_itens_vendidos'] or 0)
+                                with col4:
+                                    st.metric("Ticket Médio", f"R$ {escola['ticket_medio'] or 0:.2f}")
+                    else:
+                        st.warning("❌ Nenhum dado encontrado para o período selecionado.")
+        
+        with tab_rel2:
+            st.subheader("📦 Relatório de Estoque por Escola")
+            
+            if st.button("🔄 Gerar Relatório de Estoque", key="estoque_gestor"):
+                with st.spinner("Gerando relatório de estoque..."):
+                    relatorio = relatorio_estoque_por_escola()
+                    
+                    if relatorio:
+                        st.success(f"📦 Relatório gerado com sucesso! ({len(relatorio)} escolas)")
+                        
+                        for escola in relatorio:
+                            cor_status = "✅" if (escola['produtos_estoque_baixo'] or 0) == 0 else "⚠️"
+                            
+                            with st.expander(f"{cor_status} {escola['escola_nome']} - {escola['total_estoque'] or 0} itens"):
+                                col1, col2, col3, col4 = st.columns(4)
+                                with col1:
+                                    st.metric("Produtos", escola['total_produtos'] or 0)
+                                with col2:
+                                    st.metric("Estoque", escola['total_estoque'] or 0)
+                                with col3:
+                                    st.metric("Estoque Baixo", escola['produtos_estoque_baixo'] or 0)
+                                with col4:
+                                    st.metric("Valor", f"R$ {escola['valor_total_estoque'] or 0:.2f}")
+                    else:
+                        st.warning("❌ Nenhum dado encontrado.")
 
 def interface_vendedor():
     """Interface para Vendedor"""
@@ -1647,10 +2384,13 @@ def interface_vendedor():
                 nome = st.text_input("Nome completo*")
                 telefone = st.text_input("Telefone*")
                 email = st.text_input("Email")
+                data_nascimento = st.date_input("Data de Nascimento", max_value=date.today(), key="vendedor_nasc")
+                cpf = st.text_input("CPF", key="vendedor_cpf")
+                endereco = st.text_area("Endereço", key="vendedor_end")
                 
                 if st.form_submit_button("✅ Cadastrar Cliente"):
                     if nome and telefone:
-                        sucesso, msg = adicionar_cliente(nome, telefone, email)
+                        sucesso, msg = adicionar_cliente(nome, telefone, email, data_nascimento, cpf, endereco)
                         if sucesso:
                             st.success(msg)
                             st.rerun()
@@ -1660,11 +2400,16 @@ def interface_vendedor():
                         st.error("❌ Nome e telefone são obrigatórios!")
         
         with col2:
-            clientes = listar_clientes()
-            for cliente in clientes:
+            # Busca simples para vendedor
+            busca_cliente = st.text_input("🔍 Buscar cliente", placeholder="Nome, telefone")
+            clientes = listar_clientes_paginado(busca=busca_cliente, limit=100) if busca_cliente else listar_clientes_paginado(limit=50)
+            
+            for cliente in clientes[:20]:  # Limite de 20 clientes na visualização
                 with st.expander(f"👤 {cliente['nome']}"):
                     st.write(f"**Telefone:** {cliente['telefone']}")
                     st.write(f"**Email:** {cliente['email'] or 'N/A'}")
+                    if cliente['data_nascimento']:
+                        st.write(f"**Nascimento:** {formatar_data_brasil(cliente['data_nascimento'])}")
                     st.write(f"**Cadastro:** {formatar_data_brasil(cliente['data_cadastro'])}")
     
     with tab3:
@@ -1679,9 +2424,9 @@ def interface_vendedor():
                     with col1:
                         st.write(f"**{produto['nome']}** - {produto['tamanho']} - {produto['cor']}")
                     with col2:
-                        if produto['estoque'] < 5:
+                        if produto['estoque'] < produto['estoque_minimo']:
                             st.error(f"Estoque: {produto['estoque']}")
-                        elif produto['estoque'] < 10:
+                        elif produto['estoque'] < produto['estoque_minimo'] * 2:
                             st.warning(f"Estoque: {produto['estoque']}")
                         else:
                             st.success(f"Estoque: {produto['estoque']}")
@@ -1696,7 +2441,7 @@ def interface_pedidos(tipo_usuario):
     
     with tab1:
         # Selecionar cliente
-        clientes = listar_clientes()
+        clientes = listar_clientes_paginado(limit=1000)  # Busca todos os clientes para seleção
         
         if not clientes:
             st.error("❌ Nenhum cliente cadastrado. Cadastre clientes primeiro.")
@@ -1705,7 +2450,7 @@ def interface_pedidos(tipo_usuario):
         cliente_selecionado = st.selectbox(
             "👤 Selecione o cliente:",
             options=[c['id'] for c in clientes],
-            format_func=lambda x: f"{next(c['nome'] for c in clientes if c['id'] == x)}"
+            format_func=lambda x: f"{next(c['nome'] for c in clientes if c['id'] == x)} - {next(c['telefone'] for c in clientes if c['id'] == x)}"
         )
         
         # Mostrar TODOS os produtos de TODAS as escolas
@@ -1721,38 +2466,55 @@ def interface_pedidos(tipo_usuario):
                 
                 if produtos_escola:
                     for produto in produtos_escola:
-                        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                        col1, col2, col3, col4, col5 = st.columns([3, 1, 1, 1, 1])
                         with col1:
                             st.write(f"**{produto['nome']}**")
                             st.write(f"Tamanho: {produto['tamanho']} | Cor: {produto['cor']}")
                         with col2:
-                            st.write(f"Estoque: {produto['estoque']}")
+                            if produto['estoque'] <= 0:
+                                st.error("Sem estoque")
+                            elif produto['estoque'] < 5:
+                                st.warning(f"Estoque: {produto['estoque']}")
+                            else:
+                                st.success(f"Estoque: {produto['estoque']}")
                         with col3:
                             st.write(f"R$ {produto['preco']:.2f}")
                         with col4:
-                            # Botão para adicionar este produto específico
-                            if st.button("➕ Adicionar", key=f"add_{produto['id']}"):
-                                if 'itens_pedido' not in st.session_state:
-                                    st.session_state.itens_pedido = []
-                                
-                                # Verificar se produto já está no pedido
-                                produto_ja_adicionado = any(item['produto_id'] == produto['id'] for item in st.session_state.itens_pedido)
-                                
-                                if produto_ja_adicionado:
-                                    st.error("❌ Produto já adicionado ao pedido")
-                                elif produto['estoque'] <= 0:
-                                    st.error("❌ Produto sem estoque")
-                                else:
-                                    item = {
-                                        'produto_id': produto['id'],
-                                        'nome': produto['nome'],
-                                        'escola': produto['escola_nome'],
-                                        'quantidade': 1,
-                                        'preco_unitario': produto['preco'],
-                                        'subtotal': produto['preco'] * 1
-                                    }
-                                    st.session_state.itens_pedido.append(item)
-                                    st.success(f"✅ {produto['nome']} adicionado!")
+                            # Selecionar quantidade
+                            quantidade = st.number_input(
+                                "Qtd", 
+                                min_value=0, 
+                                max_value=min(produto['estoque'], 100) if produto['estoque'] > 0 else 0,
+                                value=0,
+                                key=f"select_{produto['id']}",
+                                step=1
+                            )
+                        with col5:
+                            if quantidade > 0:
+                                if st.button("➕ Adicionar", key=f"add_{produto['id']}"):
+                                    if 'itens_pedido' not in st.session_state:
+                                        st.session_state.itens_pedido = []
+                                    
+                                    # Verificar se produto já está no pedido
+                                    for i, item in enumerate(st.session_state.itens_pedido):
+                                        if item['produto_id'] == produto['id']:
+                                            # Atualizar quantidade existente
+                                            st.session_state.itens_pedido[i]['quantidade'] += quantidade
+                                            st.session_state.itens_pedido[i]['subtotal'] = st.session_state.itens_pedido[i]['preco_unitario'] * st.session_state.itens_pedido[i]['quantidade']
+                                            break
+                                    else:
+                                        # Adicionar novo item
+                                        item = {
+                                            'produto_id': produto['id'],
+                                            'nome': produto['nome'],
+                                            'escola': produto['escola_nome'],
+                                            'quantidade': quantidade,
+                                            'preco_unitario': produto['preco'],
+                                            'subtotal': produto['preco'] * quantidade
+                                        }
+                                        st.session_state.itens_pedido.append(item)
+                                    
+                                    st.success(f"✅ {quantidade}x {produto['nome']} adicionado!")
                                     st.rerun()
                 else:
                     st.write("📭 Nenhum produto cadastrado para esta escola")
@@ -1768,22 +2530,26 @@ def interface_pedidos(tipo_usuario):
                     st.write(f"**{item['nome']}**")
                     st.write(f"Escola: {item['escola']}")
                 with col2:
-                    # Permitir alterar quantidade
-                    nova_quantidade = st.number_input(
-                        "Qtd", 
-                        min_value=1, 
-                        value=item['quantidade'],
-                        key=f"qtd_{i}"
-                    )
-                    if nova_quantidade != item['quantidade']:
-                        item['quantidade'] = nova_quantidade
-                        item['subtotal'] = item['preco_unitario'] * nova_quantidade
-                        st.rerun()
+                    st.write(f"Qtd: {item['quantidade']}")
                 with col3:
                     st.write(f"R$ {item['preco_unitario']:.2f}")
                 with col4:
                     st.write(f"R$ {item['subtotal']:.2f}")
                 with col5:
+                    # Editar quantidade
+                    nova_quantidade = st.number_input(
+                        "Nova Qtd", 
+                        min_value=1, 
+                        value=item['quantidade'],
+                        key=f"edit_qtd_{i}",
+                        step=1
+                    )
+                    if nova_quantidade != item['quantidade']:
+                        if st.button("🔄", key=f"update_{i}"):
+                            item['quantidade'] = nova_quantidade
+                            item['subtotal'] = item['preco_unitario'] * nova_quantidade
+                            st.rerun()
+                with col6:
                     if st.button("❌", key=f"del_{i}"):
                         st.session_state.itens_pedido.pop(i)
                         st.rerun()
@@ -1794,7 +2560,14 @@ def interface_pedidos(tipo_usuario):
             
             # Finalizar pedido
             st.subheader("✅ Finalizar Pedido")
-            data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
+            col_data, col_desc = st.columns(2)
+            with col_data:
+                data_entrega = st.date_input("📅 Data de Entrega Prevista", min_value=date.today())
+            with col_desc:
+                desconto = st.number_input("Desconto (R$)", min_value=0.0, value=0.0, step=0.1)
+            
+            forma_pagamento = st.selectbox("Forma de Pagamento", 
+                                         ["Dinheiro", "Cartão de Crédito", "Cartão de Débito", "PIX", "Boleto", "Outro"])
             observacoes = st.text_area("Observações")
             
             col_btn1, col_btn2 = st.columns(2)
@@ -1803,23 +2576,36 @@ def interface_pedidos(tipo_usuario):
                     if st.session_state.itens_pedido:
                         # Verificar estoque para todos os itens
                         estoque_insuficiente = False
+                        produtos_sem_estoque = []
+                        
                         for item in st.session_state.itens_pedido:
                             produto = next((p for p in listar_produtos() if p['id'] == item['produto_id']), None)
                             if produto and item['quantidade'] > produto['estoque']:
-                                st.error(f"❌ Estoque insuficiente para {produto['nome']} (estoque: {produto['estoque']})")
+                                produtos_sem_estoque.append(f"{produto['nome']} (estoque: {produto['estoque']})")
                                 estoque_insuficiente = True
-                                break
                         
-                        if not estoque_insuficiente:
+                        if estoque_insuficiente:
+                            st.error("❌ Estoque insuficiente para os seguintes produtos:")
+                            for produto in produtos_sem_estoque:
+                                st.write(f"• {produto}")
+                        else:
+                            vendedor_id = st.session_state.get('user_id', None)
                             sucesso, resultado = adicionar_pedido(
                                 cliente_selecionado, 
                                 st.session_state.itens_pedido, 
                                 data_entrega, 
-                                observacoes
+                                observacoes,
+                                desconto,
+                                forma_pagamento,
+                                vendedor_id
                             )
                             if sucesso:
                                 st.success(f"✅ Pedido #{resultado} criado com sucesso!")
                                 st.balloons()
+                                
+                                # Oferecer download do PDF
+                                criar_botao_download_pdf(resultado, "📄 Baixar PDF do Pedido")
+                                
                                 del st.session_state.itens_pedido
                                 st.rerun()
                             else:
@@ -1836,7 +2622,47 @@ def interface_pedidos(tipo_usuario):
             st.info("🛒 Adicione itens ao pedido usando os botões 'Adicionar' acima")
     
     with tab2:
-        pedidos = listar_pedidos(tipo_usuario)
+        # Filtros e busca
+        col_filtro, col_busca, col_limite = st.columns([2, 2, 1])
+        with col_filtro:
+            filtro_status = st.selectbox("Filtrar por status", 
+                                       ["Todos", "Pendente", "Em produção", "Pronto para entrega", "Entregue", "Cancelado"])
+        with col_busca:
+            busca_cliente = st.text_input("Buscar cliente", placeholder="Nome do cliente")
+        with col_limite:
+            limite_pedidos = st.selectbox("Itens por página", [25, 50, 100], index=1)
+        
+        # Paginação
+        if 'pagina_pedidos' not in st.session_state:
+            st.session_state.pagina_pedidos = 0
+        
+        total_pedidos = contar_pedidos(
+            filtro_status if filtro_status != "Todos" else None,
+            busca_cliente if busca_cliente else None
+        )
+        total_paginas = max(1, (total_pedidos + limite_pedidos - 1) // limite_pedidos)
+        
+        pedidos = listar_pedidos_paginado(
+            tipo_usuario,
+            offset=st.session_state.pagina_pedidos * limite_pedidos,
+            limit=limite_pedidos,
+            filtro_status=filtro_status if filtro_status != "Todos" else None,
+            busca_cliente=busca_cliente if busca_cliente else None
+        )
+        
+        # Controles de paginação
+        if total_pedidos > 0:
+            col_prev, col_info, col_next = st.columns([1, 2, 1])
+            with col_prev:
+                if st.button("⬅️ Anterior", disabled=st.session_state.pagina_pedidos == 0, key="prev_pedidos"):
+                    st.session_state.pagina_pedidos -= 1
+                    st.rerun()
+            with col_info:
+                st.write(f"Página {st.session_state.pagina_pedidos + 1} de {total_paginas} ({total_pedidos} pedidos)")
+            with col_next:
+                if st.button("Próxima ➡️", disabled=st.session_state.pagina_pedidos >= total_paginas - 1, key="next_pedidos"):
+                    st.session_state.pagina_pedidos += 1
+                    st.rerun()
         
         if pedidos:
             for pedido in pedidos:
@@ -1854,11 +2680,19 @@ def interface_pedidos(tipo_usuario):
                         st.write(f"**Cliente:** {pedido['cliente_nome']}")
                         st.write(f"**Status:** {pedido['status']}")
                         st.write(f"**Data Pedido:** {formatar_datahora_brasil(pedido['data_pedido'])}")
+                        if pedido['forma_pagamento']:
+                            st.write(f"**Pagamento:** {pedido['forma_pagamento']}")
                     with col2:
                         st.write(f"**Valor Total:** R$ {pedido['valor_total']:.2f}")
+                        if pedido['desconto'] > 0:
+                            st.write(f"**Desconto:** R$ {pedido['desconto']:.2f}")
+                        st.write(f"**Valor Final:** R$ {pedido['valor_final']:.2f}")
                         st.write(f"**Entrega Prevista:** {formatar_data_brasil(pedido['data_entrega_prevista'])}")
                         if pedido['data_entrega_real']:
                             st.write(f"**Entregue em:** {formatar_data_brasil(pedido['data_entrega_real'])}")
+                    
+                    # Botão para gerar PDF
+                    criar_botao_download_pdf(pedido['id'])
                     
                     # Ações do pedido
                     col1, col2, col3 = st.columns(3)
