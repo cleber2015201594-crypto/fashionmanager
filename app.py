@@ -24,7 +24,10 @@ def get_brasil_datetime():
 # Função para formatar data no padrão BR
 def format_date_br(dt):
     if isinstance(dt, str):
-        dt = datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
+        try:
+            dt = datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
+        except:
+            return dt
     return dt.strftime("%d/%m/%Y %H:%M")
 
 # Sistema de Autenticação
@@ -232,6 +235,15 @@ def get_estoque_escola(escola_id):
     conn.close()
     return estoque
 
+def get_estoque_produto_escola(escola_id, produto_id):
+    conn = sqlite3.connect('gestao.db')
+    c = conn.cursor()
+    c.execute('''SELECT quantidade FROM estoque_escolas 
+                 WHERE escola_id = ? AND produto_id = ?''', (escola_id, produto_id))
+    resultado = c.fetchone()
+    conn.close()
+    return resultado[0] if resultado else 0
+
 def update_estoque_escola(escola_id, produto_id, quantidade):
     conn = sqlite3.connect('gestao.db')
     c = conn.cursor()
@@ -299,15 +311,9 @@ def add_pedido(cliente_id, escola_id, itens, desconto=0):
                   (pedido_id, item['produto_id'], item['quantidade'], item['preco'], item['custo'], lucro_unitario, margem_unitario))
         
         # Atualizar estoque - reduzir quantidade
-        c.execute('''SELECT quantidade FROM estoque_escolas 
-                     WHERE escola_id = ? AND produto_id = ?''', (escola_id, item['produto_id']))
-        estoque_atual = c.fetchone()
-        
-        if estoque_atual:
-            nova_quantidade = estoque_atual[0] - item['quantidade']
-            c.execute('''UPDATE estoque_escolas SET quantidade = ?
-                         WHERE escola_id = ? AND produto_id = ?''', 
-                      (nova_quantidade, escola_id, item['produto_id']))
+        estoque_atual = get_estoque_produto_escola(escola_id, item['produto_id'])
+        nova_quantidade = estoque_atual - item['quantidade']
+        update_estoque_escola(escola_id, item['produto_id'], nova_quantidade)
     
     conn.commit()
     conn.close()
@@ -522,19 +528,6 @@ def show_dashboard():
         total_vendas = sum(pedido[4] for pedido in pedidos)
         st.metric("Faturamento Total", f"R$ {total_vendas:,.2f}")
     
-    # Lucro total
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        lucro_total = sum(pedido[7] for pedido in pedidos)
-        st.metric("Lucro Total", f"R$ {lucro_total:,.2f}")
-    
-    with col2:
-        if total_vendas > 0:
-            margem_media = (lucro_total / total_vendas) * 100
-            st.metric("Margem Média", f"{margem_media:.1f}%")
-        else:
-            st.metric("Margem Média", "0%")
-    
     # Gráficos simplificados sem Plotly
     col1, col2 = st.columns(2)
     
@@ -657,49 +650,67 @@ def show_school_management():
         escolas = get_escolas()
         produtos = get_produtos()
         
-        if escolas and produtos:
-            escola_selecionada = st.selectbox("Selecione a Escola", 
-                                             [f"{e[0]} - {e[1]}" for e in escolas])
+        if not escolas:
+            st.warning("Nenhuma escola cadastrada. Cadastre uma escola primeiro.")
+            return
             
-            if escola_selecionada:
-                escola_id = int(escola_selecionada.split(' - ')[0])
-                estoque = get_estoque_escola(escola_id)
-                
-                st.write(f"**Estoque da Escola:** {escola_selecionada.split(' - ')[1]}")
-                
-                for produto in produtos:
-                    with st.form(f"estoque_{produto[0]}_{escola_id}"):
-                        col1, col2, col3 = st.columns([2, 1, 1])
-                        with col1:
-                            st.write(f"**{produto[1]}**")
-                            st.write(f"Preço: R$ {produto[3]:.2f} | Custo: R$ {produto[4]:.2f}")
-                        with col2:
-                            # Encontrar quantidade atual no estoque
-                            qtd_atual = 0
-                            for item in estoque:
-                                if item[6] == produto[0]:  # produto_id
-                                    qtd_atual = item[2]
-                                    break
-                            quantidade = st.number_input("Quantidade", min_value=0, value=qtd_atual, 
-                                                        key=f"qtd_{produto[0]}_{escola_id}")
-                        with col3:
-                            if st.form_submit_button("Atualizar"):
-                                update_estoque_escola(escola_id, produto[0], quantidade)
-                                st.success("Estoque atualizado!")
-                                st.rerun()
-                
-                # Mostrar alertas de estoque baixo
-                st.subheader("Alertas de Estoque")
-                alertas_encontrados = False
+        if not produtos:
+            st.warning("Nenhum produto cadastrado. Cadastre produtos primeiro.")
+            return
+        
+        escola_selecionada = st.selectbox("Selecione a Escola", 
+                                         [f"{e[0]} - {e[1]}" for e in escolas])
+        
+        if escola_selecionada:
+            escola_id = int(escola_selecionada.split(' - ')[0])
+            escola_nome = escola_selecionada.split(' - ')[1]
+            
+            st.write(f"### Estoque da Escola: {escola_nome}")
+            
+            # Mostrar estoque atual
+            estoque = get_estoque_escola(escola_id)
+            
+            if not estoque:
+                st.info("Nenhum produto vinculado a esta escola ainda.")
+            else:
                 for item in estoque:
-                    if item[2] <= item[3]:  # quantidade <= estoque_minimo
-                        st.warning(f"⚠️ {item[1]} - Estoque: {item[2]} (Mínimo: {item[3]})")
-                        alertas_encontrados = True
+                    col1, col2, col3 = st.columns([3, 1, 1])
+                    with col1:
+                        st.write(f"**{item[1]}**")
+                        st.write(f"Preço: R$ {item[4]:.2f} | Custo: R$ {item[5]:.2f}")
+                    with col2:
+                        st.write(f"**Estoque:** {item[2]}")
+                    with col3:
+                        if item[2] <= item[3]:
+                            st.error(f"⚠️ Mín: {item[3]}")
+                        else:
+                            st.success(f"✅ Mín: {item[3]}")
+            
+            st.markdown("---")
+            st.subheader("Ajustar Estoque")
+            
+            # Formulário para ajustar estoque
+            produto_ajuste = st.selectbox("Selecione o Produto", 
+                                         [f"{p[0]} - {p[1]}" for p in produtos])
+            quantidade_atual = 0
+            
+            if produto_ajuste:
+                produto_id = int(produto_ajuste.split(' - ')[0])
+                quantidade_atual = get_estoque_produto_escola(escola_id, produto_id)
                 
-                if not alertas_encontrados:
-                    st.success("✅ Todos os produtos com estoque suficiente")
-        else:
-            st.warning("Cadastre escolas e produtos primeiro")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.write(f"Estoque atual: **{quantidade_atual}**")
+                with col2:
+                    nova_quantidade = st.number_input("Nova quantidade", 
+                                                     min_value=0, 
+                                                     value=quantidade_atual,
+                                                     key=f"ajuste_{produto_id}")
+                
+                if st.button("Atualizar Estoque", key=f"btn_ajuste_{produto_id}"):
+                    update_estoque_escola(escola_id, produto_id, nova_quantidade)
+                    st.success(f"Estoque de {produto_ajuste.split(' - ')[1]} atualizado para {nova_quantidade}!")
+                    st.rerun()
 
 def show_product_management():
     st.title("📦 Gestão de Produtos")
@@ -720,8 +731,14 @@ def show_product_management():
                 estoque_minimo = st.number_input("Estoque Mínimo", min_value=0, value=5)
             
             # Opção para vincular automaticamente às escolas
-            vincular_escolas = st.checkbox("Vincular este produto a todas as escolas automaticamente", value=True)
-            estoque_inicial = st.number_input("Estoque inicial nas escolas", min_value=0, value=0)
+            escolas = get_escolas()
+            if escolas:
+                vincular_escolas = st.checkbox("Vincular este produto a todas as escolas automaticamente", value=True)
+                estoque_inicial = st.number_input("Estoque inicial nas escolas", min_value=0, value=0)
+            else:
+                st.warning("Cadastre escolas primeiro para vincular produtos")
+                vincular_escolas = False
+                estoque_inicial = 0
             
             if st.form_submit_button("Cadastrar Produto"):
                 if nome and preco > 0:
@@ -729,9 +746,9 @@ def show_product_management():
                     st.success("Produto cadastrado com sucesso!")
                     
                     # Vincular automaticamente às escolas
-                    if vincular_escolas:
+                    if vincular_escolas and escolas:
                         vincular_produto_todas_escolas(produto_id, estoque_inicial)
-                        st.success(f"Produto vinculado automaticamente a todas as escolas com estoque inicial de {estoque_inicial} unidades")
+                        st.success(f"Produto vinculado automaticamente a {len(escolas)} escolas com estoque inicial de {estoque_inicial} unidades")
                     
                     # Calcular margem automática
                     if preco > 0 and custo > 0:
@@ -758,15 +775,18 @@ def show_product_management():
                     st.write(f"**Margem:** {margem:.1f}%")
                     st.write(f"**Lucro Unitário:** R$ {lucro_unitario:.2f}")
                 
-                # Mostrar estoque por escola
+                # Mostrar estoque total por escola
                 st.write("**Estoque por Escola:**")
                 escolas = get_escolas()
+                tem_estoque = False
                 for escola in escolas:
-                    estoque = get_estoque_escola(escola[0])
-                    for item in estoque:
-                        if item[6] == produto[0]:  # produto_id
-                            st.write(f"- {escola[1]}: {item[2]} unidades")
-                            break
+                    estoque = get_estoque_produto_escola(escola[0], produto[0])
+                    if estoque > 0:
+                        st.write(f"- {escola[1]}: {estoque} unidades")
+                        tem_estoque = True
+                
+                if not tem_estoque:
+                    st.write("Nenhum estoque em nenhuma escola")
                 
                 if st.button(f"Excluir", key=f"del_prod_{produto[0]}"):
                     delete_produto(produto[0])
@@ -806,83 +826,75 @@ def show_order_management():
         escolas = get_escolas()
         produtos = get_produtos()
         
+        if not clientes:
+            st.warning("Cadastre clientes primeiro para criar pedidos")
+            return
+            
+        if not escolas:
+            st.warning("Cadastre escolas primeiro para criar pedidos")
+            return
+            
+        if not produtos:
+            st.warning("Cadastre produtos primeiro para criar pedidos")
+            return
+        
         with st.form("novo_pedido"):
             col1, col2 = st.columns(2)
             
             with col1:
-                cliente_options = [f"{c[0]} - {c[1]}" for c in clientes]
-                if cliente_options:
-                    cliente_selecionado = st.selectbox("Cliente *", cliente_options)
-                else:
-                    st.warning("Nenhum cliente cadastrado")
-                    cliente_selecionado = None
-                    
-                escola_options = [f"{e[0]} - {e[1]}" for e in escolas]
-                if escola_options:
-                    escola_selecionada = st.selectbox("Escola *", escola_options)
-                else:
-                    st.warning("Nenhuma escola cadastrada")
-                    escola_selecionada = None
-                    
+                cliente_selecionado = st.selectbox("Cliente *", 
+                                                  [f"{c[0]} - {c[1]}" for c in clientes])
+                escola_selecionada = st.selectbox("Escola *", 
+                                                 [f"{e[0]} - {e[1]}" for e in escolas])
                 desconto = st.number_input("Desconto (%)", min_value=0.0, max_value=100.0, value=0.0)
             
             st.subheader("Itens do Pedido")
             
             itens = []
-            if escola_selecionada:
-                escola_id = int(escola_selecionada.split(' - ')[0])
-                estoque_escola = get_estoque_escola(escola_id)
+            escola_id = int(escola_selecionada.split(' - ')[0]) if escola_selecionada else None
             
-            for i in range(3):  # Permite até 3 itens inicialmente
-                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+            # Mostrar apenas produtos com estoque na escola selecionada
+            produtos_com_estoque = []
+            for produto in produtos:
+                if escola_id:
+                    estoque = get_estoque_produto_escola(escola_id, produto[0])
+                    if estoque > 0:
+                        produtos_com_estoque.append(produto)
+            
+            for i in range(3):  # Permite até 3 itens
+                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                 with col1:
-                    # Mostrar apenas produtos com estoque disponível
-                    produto_options = []
-                    for produto in produtos:
-                        # Verificar estoque na escola selecionada
-                        estoque_disponivel = 0
-                        for item in estoque_escola:
-                            if item[6] == produto[0]:  # produto_id
-                                estoque_disponivel = item[2]
-                                break
-                        
-                        if estoque_disponivel > 0:
-                            produto_options.append(f"{produto[0]} - {produto[1]} (Estoque: {estoque_disponivel})")
-                    
-                    if produto_options:
-                        produto = st.selectbox(f"Produto {i+1}", [""] + produto_options, key=f"prod_{i}")
+                    if produtos_com_estoque:
+                        produto_opcoes = [f"{p[0]} - {p[1]} (Estoque: {get_estoque_produto_escola(escola_id, p[0])})" for p in produtos_com_estoque]
+                        produto_selecionado = st.selectbox(f"Produto {i+1}", [""] + produto_opcoes, key=f"prod_{i}")
                     else:
-                        st.warning("Nenhum produto com estoque disponível")
-                        produto = None
+                        st.warning("Nenhum produto com estoque")
+                        produto_selecionado = None
+                
                 with col2:
-                    if produto:
-                        # Obter quantidade máxima disponível
-                        produto_id = int(produto.split(' - ')[0])
-                        estoque_disponivel = 0
-                        for item in estoque_escola:
-                            if item[6] == produto_id:
-                                estoque_disponivel = item[2]
-                                break
-                        
+                    if produto_selecionado:
+                        produto_id = int(produto_selecionado.split(' - ')[0])
+                        estoque_disponivel = get_estoque_produto_escola(escola_id, produto_id)
                         quantidade = st.number_input(f"Qtd {i+1}", min_value=1, max_value=estoque_disponivel, value=1, key=f"qtd_{i}")
                     else:
-                        quantidade = st.number_input(f"Qtd {i+1}", min_value=0, value=0, key=f"qtd_{i}")
+                        quantidade = 0
+                
                 with col3:
-                    if produto:
-                        produto_id = int(produto.split(' - ')[0])
+                    if produto_selecionado:
                         produto_info = next(p for p in produtos if p[0] == produto_id)
                         preco = st.number_input(f"Preço {i+1}", min_value=0.0, value=float(produto_info[3]), key=f"preco_{i}")
-                        custo = produto_info[4]  # Custo fixo do produto
+                        custo = produto_info[4]
                     else:
-                        preco = st.number_input(f"Preço {i+1}", min_value=0.0, value=0.0, key=f"preco_{i}")
+                        preco = 0.0
                         custo = 0.0
+                
                 with col4:
-                    if produto and preco > 0 and custo > 0:
+                    if produto_selecionado and preco > 0 and custo > 0:
                         lucro_unitario = preco - custo
                         margem = (lucro_unitario / preco * 100) if preco > 0 else 0
                         st.write(f"Margem: {margem:.1f}%")
                 
-                if produto and quantidade > 0:
+                if produto_selecionado and quantidade > 0:
                     itens.append({
                         'produto_id': produto_id,
                         'quantidade': quantidade,
@@ -909,11 +921,15 @@ def show_order_management():
                 with col4:
                     st.metric("Margem", f"{margem_lucro:.1f}%")
             
-            if st.form_submit_button("Criar Pedido") and cliente_selecionado and escola_selecionada:
-                cliente_id = int(cliente_selecionado.split(' - ')[0])
-                escola_id = int(escola_selecionada.split(' - ')[0])
-                
-                if itens:
+            if st.form_submit_button("Criar Pedido"):
+                if not cliente_selecionado or not escola_selecionada:
+                    st.error("Selecione cliente e escola")
+                elif not itens:
+                    st.error("Adicione pelo menos um item ao pedido")
+                else:
+                    cliente_id = int(cliente_selecionado.split(' - ')[0])
+                    escola_id = int(escola_selecionada.split(' - ')[0])
+                    
                     pedido_id = add_pedido(cliente_id, escola_id, itens, desconto)
                     st.success(f"Pedido #{pedido_id} criado com sucesso!")
                     
@@ -926,8 +942,6 @@ def show_order_management():
                     - Lucro: R$ {lucro_total:.2f}
                     - Margem: {margem_lucro:.1f}%
                     """)
-                else:
-                    st.error("Adicione pelo menos um item ao pedido")
     
     with tab2:
         st.subheader("Histórico de Pedidos")
@@ -961,24 +975,27 @@ def show_order_management():
                     st.write(f"**Lucro:** R$ {pedido[7]:.2f}")
                     st.write(f"**Margem:** {pedido[8]:.1f}%")
                 
-                # Botão para alterar status
-                col1, col2, col3 = st.columns(3)
+                # Botões para alterar status
+                st.write("**Alterar Status:**")
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    if st.button("✅ Confirmado", key=f"confirm_{pedido[0]}"):
+                    if st.button("✅ Confirmar", key=f"confirm_{pedido[0]}"):
                         update_pedido_status(pedido[0], "Confirmado")
                         st.rerun()
                 with col2:
-                    if st.button("🚚 Enviado", key=f"enviado_{pedido[0]}"):
+                    if st.button("🚚 Enviar", key=f"enviar_{pedido[0]}"):
                         update_pedido_status(pedido[0], "Enviado")
                         st.rerun()
                 with col3:
                     if st.button("📦 Entregue", key=f"entregue_{pedido[0]}"):
                         update_pedido_status(pedido[0], "Entregue")
                         st.rerun()
-                
-                if st.button("❌ Cancelar", key=f"cancel_{pedido[0]}"):
-                    update_pedido_status(pedido[0], "Cancelado")
-                    st.rerun()
+                with col4:
+                    if st.button("❌ Cancelar", key=f"cancelar_{pedido[0]}"):
+                        update_pedido_status(pedido[0], "Cancelado")
+                        st.rerun()
+
+# ... (o restante do código permanece igual - reports, ai_system, admin_panel)
 
 def show_reports():
     st.title("📈 Relatórios e Análises")
@@ -1127,12 +1144,9 @@ def show_ai_system():
         for produto in produtos:
             tem_estoque = False
             for escola in escolas:
-                estoque = get_estoque_escola(escola[0])
-                for item in estoque:
-                    if item[6] == produto[0] and item[2] > 0:
-                        tem_estoque = True
-                        break
-                if tem_estoque:
+                estoque = get_estoque_produto_escola(escola[0], produto[0])
+                if estoque > 0:
+                    tem_estoque = True
                     break
             
             if not tem_estoque:
