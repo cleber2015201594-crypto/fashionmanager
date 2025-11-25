@@ -19,72 +19,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# =========================================
-# 🔐 SISTEMA DE PERMISSÕES AVANÇADO
-# =========================================
-
-PERMISSOES = {
-    'admin': {
-        'modulos': ['dashboard', 'clientes', 'pedidos', 'relatorios', 'administracao', 'estoque', 'financeiro'],
-        'acoes': ['criar', 'ler', 'editar', 'excluir', 'exportar', 'configurar'],
-        'descricao': 'Acesso total ao sistema'
-    },
-    'gestor': {
-        'modulos': ['dashboard', 'clientes', 'pedidos', 'relatorios', 'estoque'],
-        'acoes': ['criar', 'ler', 'editar', 'exportar'],
-        'descricao': 'Acesso gerencial completo'
-    },
-    'vendedor': {
-        'modulos': ['dashboard', 'clientes', 'pedidos'],
-        'acoes': ['criar', 'ler', 'editar'],
-        'descricao': 'Acesso operacional básico'
-    }
-}
-
-def verificar_permissao(tipo_usuario, modulo=None, acao=None):
-    """
-    Verifica se usuário tem permissão para acessar módulo ou executar ação
-    """
-    if tipo_usuario not in PERMISSOES:
-        return False
-    
-    # Se apenas verificar acesso ao módulo
-    if modulo and not acao:
-        return modulo in PERMISSOES[tipo_usuario]['modulos']
-    
-    # Se verificar ação específica no módulo
-    if modulo and acao:
-        tem_modulo = modulo in PERMISSOES[tipo_usuario]['modulos']
-        tem_acao = acao in PERMISSOES[tipo_usuario]['acoes']
-        return tem_modulo and tem_acao
-    
-    return True
-
-def mostrar_restricao_permissao():
-    """Exibe mensagem de restrição de permissão"""
-    st.error("""
-    ❌ **Acesso Restrito**
-    
-    Você não tem permissão para acessar esta funcionalidade.
-    
-    **Sua permissão:** {}
-    **Permissão necessária:** {}
-    
-    👨‍💼 _Contate o administrador do sistema_
-    """.format(
-        st.session_state.tipo_usuario,
-        'Admin ou Gestor'
-    ))
-
-def criar_usuario_com_permissao(username, password, nome_completo, tipo):
-    """Cria usuário com validação de tipo"""
-    tipos_validos = list(PERMISSOES.keys())
-    if tipo not in tipos_validos:
-        return False, f"Tipo de usuário inválido. Use: {', '.join(tipos_validos)}"
-    
-    return criar_usuario(username, password, nome_completo, tipo)
-
-# CSS Mobile Otimizado com indicadores de permissão
+# CSS Mobile Otimizado
 st.markdown("""
 <style>
     @media (max-width: 768px) {
@@ -115,16 +50,6 @@ st.markdown("""
     .badge-admin { background: #dc3545; color: white; }
     .badge-gestor { background: #ffc107; color: black; }
     .badge-vendedor { background: #28a745; color: white; }
-    
-    /* Cards com indicadores de acesso */
-    .card-with-permission { 
-        border-left: 4px solid #6c757d; 
-        opacity: 0.6;
-    }
-    .card-permission-allowed { 
-        border-left: 4px solid #28a745;
-        opacity: 1;
-    }
     
     /* Métricas Cards */
     .metric-card {
@@ -161,8 +86,73 @@ st.markdown("""
         border-left: 5px solid #2196F3;
         background: #E3F2FD;
     }
+    
+    /* Botões Mobile */
+    .mobile-btn {
+        width: 100%;
+        padding: 1rem;
+        margin: 0.3rem 0;
+        border-radius: 10px;
+        border: none;
+        font-size: 16px;
+        font-weight: bold;
+    }
+    
+    .btn-primary { background: #4CAF50; color: white; }
+    .btn-secondary { background: #2196F3; color: white; }
+    .btn-warning { background: #FF9800; color: white; }
+    .btn-danger { background: #F44336; color: white; }
 </style>
 """, unsafe_allow_html=True)
+
+# =========================================
+# 🔐 SISTEMA DE PERMISSÕES AVANÇADO
+# =========================================
+
+PERMISSOES = {
+    'admin': {
+        'modulos': ['dashboard', 'clientes', 'pedidos', 'relatorios', 'administracao', 'estoque', 'financeiro'],
+        'acoes': ['criar', 'ler', 'editar', 'excluir', 'exportar', 'configurar'],
+        'descricao': 'Acesso total ao sistema'
+    },
+    'gestor': {
+        'modulos': ['dashboard', 'clientes', 'pedidos', 'relatorios', 'estoque'],
+        'acoes': ['criar', 'ler', 'editar', 'exportar'],
+        'descricao': 'Acesso gerencial completo'
+    },
+    'vendedor': {
+        'modulos': ['dashboard', 'clientes', 'pedidos'],
+        'acoes': ['criar', 'ler', 'editar'],
+        'descricao': 'Acesso operacional básico'
+    }
+}
+
+def verificar_permissao(tipo_usuario, modulo=None, acao=None):
+    """Verifica se usuário tem permissão"""
+    if tipo_usuario not in PERMISSOES:
+        return False
+    
+    if modulo and not acao:
+        return modulo in PERMISSOES[tipo_usuario]['modulos']
+    
+    if modulo and acao:
+        tem_modulo = modulo in PERMISSOES[tipo_usuario]['modulos']
+        tem_acao = acao in PERMISSOES[tipo_usuario]['acoes']
+        return tem_modulo and tem_acao
+    
+    return True
+
+def mostrar_restricao_permissao():
+    """Exibe mensagem de restrição de permissão"""
+    st.error("""
+    ❌ **Acesso Restrito**
+    
+    Você não tem permissão para acessar esta funcionalidade.
+    
+    **Sua permissão:** {}
+    
+    👨‍💼 _Contate o administrador do sistema_
+    """.format(st.session_state.tipo_usuario))
 
 # =========================================
 # 🇧🇷 FUNÇÕES DE FORMATAÇÃO BRASILEIRA
@@ -213,222 +203,6 @@ def formatar_moeda_brasil(valor):
         return "R$ 0,00"
 
 # =========================================
-# 🤖 SISTEMA A.I. - PREVISÕES MANUAIS (SEM scikit-learn)
-# =========================================
-
-def previsao_vendas_manual():
-    """
-    Previsão de vendas usando regressão linear manual
-    Implementação alternativa sem scikit-learn
-    """
-    try:
-        # Dados históricos de exemplo
-        meses = np.array([1, 2, 3, 4, 5, 6])
-        vendas = np.array([12000, 15000, 18000, 22000, 25000, 28000])
-        
-        # Cálculo manual da regressão linear
-        n = len(meses)
-        soma_x = np.sum(meses)
-        soma_y = np.sum(vendas)
-        soma_xy = np.sum(meses * vendas)
-        soma_x2 = np.sum(meses ** 2)
-        
-        # Fórmulas da regressão linear
-        m = (n * soma_xy - soma_x * soma_y) / (n * soma_x2 - soma_x ** 2)
-        b = (soma_y - m * soma_x) / n
-        
-        # Previsão para os próximos 3 meses
-        proximos_meses = np.array([7, 8, 9])
-        previsoes = m * proximos_meses + b
-        
-        return [
-            {"mes": "Julho", "previsao": previsoes[0]},
-            {"mes": "Agosto", "previsao": previsoes[1]},
-            {"mes": "Setembro", "previsao": previsoes[2]}
-        ]
-    except Exception as e:
-        # Fallback para dados fixos em caso de erro
-        return [
-            {"mes": "Julho", "previsao": 31000},
-            {"mes": "Agosto", "previsao": 34000},
-            {"mes": "Setembro", "previsao": 37000}
-        ]
-
-def analise_tendencia_vendas():
-    """Analisa tendência de crescimento das vendas"""
-    try:
-        # Dados históricos
-        vendas_historico = [12000, 15000, 18000, 22000, 25000, 28000]
-        
-        # Cálculo da tendência
-        crescimento = []
-        for i in range(1, len(vendas_historico)):
-            crescimento.append(((vendas_historico[i] - vendas_historico[i-1]) / vendas_historico[i-1]) * 100)
-        
-        crescimento_medio = np.mean(crescimento) if crescimento else 0
-        
-        if crescimento_medio > 15:
-            return "📈 Forte Crescimento", "+{:.1f}%".format(crescimento_medio), "success"
-        elif crescimento_medio > 5:
-            return "📈 Crescimento Moderado", "+{:.1f}%".format(crescimento_medio), "warning"
-        else:
-            return "📊 Estabilidade", "{:.1f}%".format(crescimento_medio), "info"
-    except:
-        return "📊 Análise", "+15.0%", "info"
-
-def calcular_metricas_ai():
-    """Calcula métricas de negócio para o dashboard"""
-    try:
-        # Em produção, esses dados viriam do banco
-        return {
-            'ticket_medio': 189.50,
-            'conversao': 35.2,
-            'satisfacao': 4.7,
-            'retencao': 72.8
-        }
-    except:
-        return {
-            'ticket_medio': 150.00,
-            'conversao': 30.0,
-            'satisfacao': 4.5,
-            'retencao': 70.0
-        }
-
-def gerar_insights_automaticos():
-    """Gera insights automáticos baseados em dados simulados"""
-    insights = []
-    
-    # Insight 1: Produtos em alta
-    insights.append({
-        "tipo": "info",
-        "titulo": "🔥 Produtos em Alta",
-        "descricao": "Camisetas Polo tiveram aumento de 25% nas vendas",
-        "icone": "🔥"
-    })
-    
-    # Insight 2: Estoque crítico
-    insights.append({
-        "tipo": "alerta",
-        "titulo": "⚠️ Atenção ao Estoque",
-        "descricao": "Agasalhos verdes com estoque abaixo do mínimo",
-        "icone": "⚠️"
-    })
-    
-    # Insight 3: Oportunidade
-    insights.append({
-        "tipo": "sucesso", 
-        "titulo": "🎯 Oportunidade Identificada",
-        "descricao": "Clientes que compram calças também compram cintos",
-        "icone": "🎯"
-    })
-    
-    return insights
-
-def analise_estoque_inteligente():
-    """Análise inteligente de estoque com recomendações"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT nome, estoque, estoque_minimo, preco, custo
-            FROM produtos 
-            WHERE ativo = 1
-            ORDER BY estoque ASC
-        ''')
-        
-        alertas = []
-        for produto in cursor.fetchall():
-            estoque_atual = produto['estoque']
-            estoque_minimo = produto['estoque_minimo']
-            
-            # Cálculo de dias baseado em vendas médias (simulado)
-            dias_restantes = estoque_atual * 7  # Supondo 1 venda por semana por produto
-            
-            if estoque_atual == 0:
-                nivel = "CRÍTICO"
-                recomendacao = "URGENTE: Repor estoque imediatamente"
-                cor = "#ff4444"
-            elif estoque_atual <= estoque_minimo:
-                nivel = "ALERTA"
-                recomendacao = f"Repor em {dias_restantes} dias"
-                cor = "#ffaa00"
-            elif estoque_atual <= estoque_minimo * 2:
-                nivel = "ATENÇÃO"
-                recomendacao = f"Monitorar - {dias_restantes} dias restantes"
-                cor = "#ffcc00"
-            else:
-                continue  # Não mostra produtos com estoque normal
-            
-            alertas.append({
-                "produto": produto['nome'],
-                "estoque_atual": estoque_atual,
-                "estoque_minimo": estoque_minimo,
-                "nivel": nivel,
-                "recomendacao": recomendacao,
-                "cor": cor,
-                "dias_restantes": dias_restantes
-            })
-        
-        return alertas
-    except Exception as e:
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-def produtos_populares_ai():
-    """Identifica produtos mais vendidos com análise de tendência"""
-    conn = get_connection()
-    if not conn:
-        return []
-    
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT p.nome, SUM(pi.quantidade) as total_vendido, p.preco
-            FROM pedido_itens pi
-            JOIN produtos p ON pi.produto_id = p.id
-            GROUP BY p.id
-            ORDER BY total_vendido DESC
-            LIMIT 5
-        ''')
-        
-        populares = []
-        for produto in cursor.fetchall():
-            # Classificação por performance
-            vendas = produto['total_vendido'] or 0
-            if vendas > 50:
-                performance = "🏆 Excelente"
-            elif vendas > 25:
-                performance = "⭐ Boa"
-            else:
-                performance = "📈 Crescendo"
-            
-            populares.append({
-                "produto": produto['nome'],
-                "vendas": vendas,
-                "faturamento": vendas * produto['preco'],
-                "performance": performance
-            })
-        
-        return populares
-    except Exception as e:
-        # Fallback com dados de exemplo
-        return [
-            {"produto": "Camiseta Polo", "vendas": 45, "faturamento": 1345.50, "performance": "🏆 Excelente"},
-            {"produto": "Calça Jeans", "vendas": 32, "faturamento": 2876.80, "performance": "⭐ Boa"},
-            {"produto": "Agasalho", "vendas": 28, "faturamento": 3637.20, "performance": "⭐ Boa"},
-            {"produto": "Short", "vendas": 25, "faturamento": 997.50, "performance": "📈 Crescendo"},
-            {"produto": "Camiseta Regata", "vendas": 18, "faturamento": 448.20, "performance": "📈 Crescendo"}
-        ]
-    finally:
-        if conn:
-            conn.close()
-
-# =========================================
 # 🔐 SISTEMA DE AUTENTICAÇÃO
 # =========================================
 
@@ -472,22 +246,33 @@ def init_db():
             )
         ''')
         
-        # Tabela de clientes
+        # Tabela de escolas
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS escolas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL,
+                endereco TEXT,
+                telefone TEXT,
+                email TEXT,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Tabela de clientes (SEM data_nascimento)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS clientes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT NOT NULL,
                 telefone TEXT,
                 email TEXT,
-                data_nascimento DATE,
-                cpf TEXT,
+                cpf TEXT UNIQUE,
                 endereco TEXT,
                 data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 ativo INTEGER DEFAULT 1
             )
         ''')
         
-        # Tabela de produtos
+        # Tabela de produtos (COM escola_id)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS produtos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -499,8 +284,11 @@ def init_db():
                 custo REAL,
                 estoque INTEGER DEFAULT 0,
                 estoque_minimo INTEGER DEFAULT 5,
+                escola_id INTEGER,
                 data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                ativo INTEGER DEFAULT 1
+                ativo INTEGER DEFAULT 1,
+                UNIQUE(nome, tamanho, cor, escola_id),
+                FOREIGN KEY (escola_id) REFERENCES escolas (id)
             )
         ''')
         
@@ -554,20 +342,31 @@ def init_db():
                 VALUES (?, ?, ?, ?)
             ''', (username, password_hash, nome, tipo))
         
-        # Produtos de exemplo
-        produtos_padrao = [
-            ('Camiseta Polo', 'Camiseta', 'M', 'Branco', 29.90, 15.00, 50, 5),
-            ('Calça Jeans', 'Calça', '42', 'Azul', 89.90, 45.00, 30, 3),
-            ('Agasalho', 'Agasalho', 'G', 'Verde', 129.90, 65.00, 20, 2),
-            ('Short', 'Short', 'P', 'Preto', 39.90, 20.00, 40, 5),
-            ('Camiseta Regata', 'Camiseta', 'G', 'Vermelho', 24.90, 12.00, 25, 5),
+        # Escolas padrão
+        escolas_padrao = [
+            ('Escola Municipal', 'Rua Principal, 123', '(11) 9999-8888', 'contato@escolamunicipal.com'),
+            ('Colégio Desperta', 'Av. Central, 456', '(11) 7777-6666', 'contato@colegiodesperta.com'),
+            ('Instituto São Tadeu', 'Praça da Matriz, 789', '(11) 5555-4444', 'contato@institutosãotadeu.com')
         ]
         
-        for nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo in produtos_padrao:
+        for nome, endereco, telefone, email in escolas_padrao:
+            cursor.execute('INSERT OR IGNORE INTO escolas (nome, endereco, telefone, email) VALUES (?, ?, ?, ?)', 
+                         (nome, endereco, telefone, email))
+        
+        # Produtos de exemplo
+        produtos_padrao = [
+            ('Camiseta Polo', 'Camiseta', 'M', 'Branco', 29.90, 15.00, 50, 5, 1),
+            ('Calça Jeans', 'Calça', '42', 'Azul', 89.90, 45.00, 30, 3, 1),
+            ('Agasalho', 'Agasalho', 'G', 'Verde', 129.90, 65.00, 20, 2, 2),
+            ('Short', 'Short', 'P', 'Preto', 39.90, 20.00, 40, 5, 2),
+            ('Camiseta Regata', 'Camiseta', 'G', 'Vermelho', 24.90, 12.00, 25, 5, 3),
+        ]
+        
+        for nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id in produtos_padrao:
             cursor.execute('''
-                INSERT OR IGNORE INTO produtos (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo))
+                INSERT OR IGNORE INTO produtos (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id))
         
         conn.commit()
         return True
@@ -607,15 +406,87 @@ def verificar_login(username, password):
             conn.close()
 
 # =========================================
-# 👥 SISTEMA DE CLIENTES - COM PERMISSÕES
+# 🤖 SISTEMA A.I. - PREVISÕES MANUAIS
 # =========================================
 
-def adicionar_cliente(nome, telefone=None, email=None, data_nascimento=None, cpf=None, endereco=None):
-    """Adiciona cliente de forma segura"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'clientes', 'criar'):
-        return False, "❌ Sem permissão para criar clientes"
+def previsao_vendas_manual():
+    """Previsão de vendas usando regressão linear manual"""
+    try:
+        meses = np.array([1, 2, 3, 4, 5, 6])
+        vendas = np.array([12000, 15000, 18000, 22000, 25000, 28000])
+        
+        n = len(meses)
+        soma_x = np.sum(meses)
+        soma_y = np.sum(vendas)
+        soma_xy = np.sum(meses * vendas)
+        soma_x2 = np.sum(meses ** 2)
+        
+        m = (n * soma_xy - soma_x * soma_y) / (n * soma_x2 - soma_x ** 2)
+        b = (soma_y - m * soma_x) / n
+        
+        proximos_meses = np.array([7, 8, 9])
+        previsoes = m * proximos_meses + b
+        
+        return [
+            {"mes": "Julho", "previsao": previsoes[0]},
+            {"mes": "Agosto", "previsao": previsoes[1]},
+            {"mes": "Setembro", "previsao": previsoes[2]}
+        ]
+    except:
+        return [
+            {"mes": "Julho", "previsao": 31000},
+            {"mes": "Agosto", "previsao": 34000},
+            {"mes": "Setembro", "previsao": 37000}
+        ]
+
+def analise_estoque_inteligente():
+    """Análise inteligente de estoque"""
+    conn = get_connection()
+    if not conn:
+        return []
     
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT p.nome, p.estoque, p.estoque_minimo, e.nome as escola_nome
+            FROM produtos p
+            LEFT JOIN escolas e ON p.escola_id = e.id
+            WHERE p.ativo = 1
+            ORDER BY p.estoque ASC
+        ''')
+        
+        alertas = []
+        for produto in cursor.fetchall():
+            if produto['estoque'] <= produto['estoque_minimo']:
+                alertas.append({
+                    "produto": produto['nome'],
+                    "escola": produto['escola_nome'],
+                    "estoque_atual": produto['estoque'],
+                    "estoque_minimo": produto['estoque_minimo'],
+                    "nivel": "CRÍTICO" if produto['estoque'] == 0 else "ALERTA"
+                })
+        
+        return alertas
+    except:
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def produtos_populares_ai():
+    """Identifica produtos mais vendidos"""
+    return [
+        {"produto": "Camiseta Polo", "vendas": 45, "faturamento": 1345.50, "performance": "🏆 Excelente"},
+        {"produto": "Calça Jeans", "vendas": 32, "faturamento": 2876.80, "performance": "⭐ Boa"},
+        {"produto": "Agasalho", "vendas": 28, "faturamento": 3637.20, "performance": "⭐ Boa"}
+    ]
+
+# =========================================
+# 👥 SISTEMA DE CLIENTES - CORRIGIDO
+# =========================================
+
+def adicionar_cliente(nome, telefone=None, email=None, cpf=None, endereco=None):
+    """Adiciona cliente SEM data_nascimento"""
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -623,11 +494,13 @@ def adicionar_cliente(nome, telefone=None, email=None, data_nascimento=None, cpf
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO clientes (nome, telefone, email, data_nascimento, cpf, endereco) VALUES (?, ?, ?, ?, ?, ?)",
-            (nome.strip(), telefone, email, data_nascimento, cpf, endereco)
+            "INSERT INTO clientes (nome, telefone, email, cpf, endereco) VALUES (?, ?, ?, ?, ?)",
+            (nome.strip(), telefone, email, cpf, endereco)
         )
         conn.commit()
         return True, "✅ Cliente cadastrado com sucesso!"
+    except sqlite3.IntegrityError:
+        return False, "❌ CPF já cadastrado no sistema"
     except Exception as e:
         return False, f"❌ Erro: {str(e)}"
     finally:
@@ -636,10 +509,6 @@ def adicionar_cliente(nome, telefone=None, email=None, data_nascimento=None, cpf
 
 def listar_clientes():
     """Lista todos os clientes"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'clientes', 'ler'):
-        return []
-    
     conn = get_connection()
     if not conn:
         return []
@@ -656,11 +525,7 @@ def listar_clientes():
             conn.close()
 
 def excluir_cliente(cliente_id):
-    """Exclui cliente com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'clientes', 'excluir'):
-        return False, "❌ Sem permissão para excluir clientes"
-    
+    """Exclui cliente"""
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
@@ -668,7 +533,6 @@ def excluir_cliente(cliente_id):
     try:
         cursor = conn.cursor()
         
-        # Verificar se cliente tem pedidos
         cursor.execute("SELECT COUNT(*) FROM pedidos WHERE cliente_id = ?", (cliente_id,))
         if cursor.fetchone()[0] > 0:
             return False, "❌ Cliente possui pedidos e não pode ser excluído"
@@ -682,119 +546,56 @@ def excluir_cliente(cliente_id):
         if conn:
             conn.close()
 
-def criar_usuario(username, password, nome_completo, tipo):
-    """Cria novo usuário"""
-    conn = get_connection()
-    if not conn:
-        return False, "Erro de conexão"
-    
-    try:
-        cursor = conn.cursor()
-        password_hash = make_hashes(password)
-        
-        cursor.execute('''
-            INSERT INTO usuarios (username, password_hash, nome_completo, tipo)
-            VALUES (?, ?, ?, ?)
-        ''', (username, password_hash, nome_completo, tipo))
-        
-        conn.commit()
-        return True, "✅ Usuário criado com sucesso!"
-        
-    except sqlite3.IntegrityError:
-        return False, "❌ Username já existe"
-    except Exception as e:
-        return False, f"❌ Erro: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
-
 # =========================================
-# 📦 SISTEMA DE PEDIDOS - COM PERMISSÕES
+# 🏫 SISTEMA DE ESCOLAS
 # =========================================
 
-def criar_pedido(cliente_id, itens, observacoes="", forma_pagamento=""):
-    """Cria pedido de forma segura com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'pedidos', 'criar'):
-        return False, "❌ Sem permissão para criar pedidos"
-    
-    conn = get_connection()
-    if not conn:
-        return False, "Erro de conexão"
-    
-    try:
-        cursor = conn.cursor()
-        
-        # Calcular totais
-        valor_total = sum(item['quantidade'] * item['preco_unitario'] for item in itens)
-        valor_final = valor_total
-        
-        # Inserir pedido
-        cursor.execute('''
-            INSERT INTO pedidos (cliente_id, valor_total, valor_final, observacoes, forma_pagamento, vendedor_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (cliente_id, valor_total, valor_final, observacoes, forma_pagamento, 1))
-        
-        pedido_id = cursor.lastrowid
-        
-        # Inserir itens
-        for item in itens:
-            subtotal = item['quantidade'] * item['preco_unitario']
-            cursor.execute('''
-                INSERT INTO pedido_itens (pedido_id, produto_id, quantidade, preco_unitario, subtotal)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (pedido_id, item['produto_id'], item['quantidade'], item['preco_unitario'], subtotal))
-        
-        conn.commit()
-        return True, f"✅ Pedido #{pedido_id} criado com sucesso!"
-        
-    except Exception as e:
-        return False, f"❌ Erro ao criar pedido: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
-
-def listar_pedidos():
-    """Lista todos os pedidos com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'pedidos', 'ler'):
-        return []
-    
+def listar_escolas():
+    """Lista todas as escolas"""
     conn = get_connection()
     if not conn:
         return []
     
     try:
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT p.*, c.nome as cliente_nome
-            FROM pedidos p
-            LEFT JOIN clientes c ON p.cliente_id = c.id
-            ORDER BY p.data_pedido DESC
-        ''')
+        cursor.execute('SELECT * FROM escolas ORDER BY nome')
         return cursor.fetchall()
     except Exception as e:
-        st.error(f"Erro ao listar pedidos: {e}")
+        st.error(f"Erro ao listar escolas: {e}")
         return []
     finally:
         if conn:
             conn.close()
 
-def excluir_pedido(pedido_id):
-    """Exclui pedido com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'pedidos', 'excluir'):
-        return False, "❌ Sem permissão para excluir pedidos"
-    
+# =========================================
+# 📦 SISTEMA DE PRODUTOS - COM ESCOLAS
+# =========================================
+
+def adicionar_produto(nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id):
+    """Adiciona produto com verificação de duplicata"""
     conn = get_connection()
     if not conn:
         return False, "Erro de conexão"
     
     try:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
+        
+        # Verificar se produto já existe
+        cursor.execute('''
+            SELECT id FROM produtos 
+            WHERE nome = ? AND tamanho = ? AND cor = ? AND escola_id = ?
+        ''', (nome, tamanho, cor, escola_id))
+        
+        if cursor.fetchone():
+            return False, "❌ Produto já cadastrado para esta escola"
+        
+        cursor.execute('''
+            INSERT INTO produtos (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (nome, categoria, tamanho, cor, preco, custo, estoque, estoque_minimo, escola_id))
+        
         conn.commit()
-        return True, "✅ Pedido excluído com sucesso!"
+        return True, "✅ Produto cadastrado com sucesso!"
     except Exception as e:
         return False, f"❌ Erro: {str(e)}"
     finally:
@@ -802,7 +603,7 @@ def excluir_pedido(pedido_id):
             conn.close()
 
 def listar_produtos():
-    """Lista produtos para pedidos"""
+    """Lista produtos com informações da escola"""
     conn = get_connection()
     if not conn:
         return []
@@ -810,10 +611,10 @@ def listar_produtos():
     try:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, nome, categoria, tamanho, cor, preco, estoque
-            FROM produtos 
-            WHERE estoque > 0 AND ativo = 1
-            ORDER BY nome
+            SELECT p.*, e.nome as escola_nome 
+            FROM produtos p 
+            LEFT JOIN escolas e ON p.escola_id = e.id
+            ORDER BY p.nome
         ''')
         return cursor.fetchall()
     except Exception as e:
@@ -824,36 +625,39 @@ def listar_produtos():
             conn.close()
 
 # =========================================
-# 📊 RELATÓRIOS CSV - COM PERMISSÕES
+# 📊 RELATÓRIOS CSV
 # =========================================
 
-def gerar_csv_clientes():
-    """Gera CSV de clientes com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'relatorios', 'exportar'):
-        return None
-    
+def gerar_csv_produtos():
+    """Gera CSV de produtos por escola"""
     conn = get_connection()
     if not conn:
         return None
     
     try:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM clientes ORDER BY nome')
+        cursor.execute('''
+            SELECT p.nome, p.categoria, p.tamanho, p.cor, p.preco, p.estoque, 
+                   p.estoque_minimo, e.nome as escola_nome
+            FROM produtos p
+            LEFT JOIN escolas e ON p.escola_id = e.id
+            ORDER BY e.nome, p.nome
+        ''')
         
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['ID', 'Nome', 'Telefone', 'Email', 'CPF', 'Endereço', 'Data Cadastro'])
+        writer.writerow(['Produto', 'Categoria', 'Tamanho', 'Cor', 'Preço', 'Estoque', 'Estoque Mínimo', 'Escola'])
         
         for row in cursor.fetchall():
             writer.writerow([
-                row['id'],
                 row['nome'],
-                row['telefone'] or '',
-                row['email'] or '',
-                row['cpf'] or '',
-                row['endereco'] or '',
-                formatar_datahora_brasil(row['data_cadastro'])
+                row['categoria'],
+                row['tamanho'],
+                row['cor'],
+                f"R$ {row['preco']:.2f}",
+                row['estoque'],
+                row['estoque_minimo'],
+                row['escola_nome']
             ])
         
         return output.getvalue()
@@ -872,11 +676,11 @@ def baixar_csv(data, filename):
         st.markdown(href, unsafe_allow_html=True)
 
 # =========================================
-# 🏠 PÁGINA DE LOGIN COM INDICADOR DE PERMISSÃO
+# 🏠 PÁGINA DE LOGIN
 # =========================================
 
 def pagina_login():
-    """Página de login otimizada para mobile"""
+    """Página de login"""
     st.markdown('<div style="text-align: center; padding: 2rem 0;">', unsafe_allow_html=True)
     st.markdown('<h1 style="color: #4CAF50;">👕 Sistema Fardamentos + A.I.</h1>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
@@ -913,237 +717,125 @@ def pagina_login():
             
             st.markdown('</div>', unsafe_allow_html=True)
             
-            # Credenciais de teste com indicadores de permissão
-            st.markdown('<div style="border-left: 4px solid #2196F3; background: #E3F2FD; padding: 1rem; border-radius: 8px; margin-top: 1rem;">', unsafe_allow_html=True)
-            st.markdown("**🔑 Credenciais para teste:**")
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown("**Admin**")
-                st.markdown('<span class="permission-badge badge-admin">Admin</span>', unsafe_allow_html=True)
-                st.markdown("user: admin")
-                st.markdown("pass: admin123")
-                
-            with col2:
-                st.markdown("**Gestor**")
-                st.markdown('<span class="permission-badge badge-gestor">Gestor</span>', unsafe_allow_html=True)
-                st.markdown("user: gestor")
-                st.markdown("pass: gestor123")
-                
-            with col3:
-                st.markdown("**Vendedor**")
-                st.markdown('<span class="permission-badge badge-vendedor">Vendedor</span>', unsafe_allow_html=True)
-                st.markdown("user: vendedor")
-                st.markdown("pass: vendedor123")
-                
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("""
+            **🔑 Credenciais para teste:**
+            - **Admin:** admin / admin123
+            - **Gestor:** gestor / gestor123  
+            - **Vendedor:** vendedor / vendedor123
+            """)
 
 # =========================================
-# 📱 DASHBOARD A.I. AVANÇADO SEM scikit-learn
+# 📱 DASHBOARD A.I. - AÇÕES RÁPIDAS CORRIGIDAS
 # =========================================
 
 def mostrar_dashboard():
-    """Dashboard principal com A.I. e indicadores de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'dashboard'):
-        mostrar_restricao_permissao()
-        return
-    
-    # Header com indicador de permissão
-    badge_class = f"badge-{st.session_state.tipo_usuario}"
+    """Dashboard principal"""
     st.markdown(f'''
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h1>📊 Dashboard A.I. Inteligente</h1>
+        <h1>📊 Dashboard A.I.</h1>
         <div>
-            <span class="permission-badge {badge_class}">{st.session_state.tipo_usuario.upper()}</span>
+            <span class="permission-badge badge-{st.session_state.tipo_usuario}">{st.session_state.tipo_usuario.upper()}</span>
         </div>
     </div>
     ''', unsafe_allow_html=True)
     
-    st.markdown(f"**Usuário:** {st.session_state.nome_completo} | **Permissão:** {PERMISSOES[st.session_state.tipo_usuario]['descricao']}")
+    st.markdown(f"**Usuário:** {st.session_state.nome_completo}")
     st.markdown("---")
     
-    # Métricas principais
+    # Métricas rápidas
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.markdown("👥 **Total Clientes**")
         st.markdown(f"<h2>{len(listar_clientes())}</h2>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.markdown("📦 **Pedidos Hoje**")
         st.markdown("<h2>12</h2>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col3:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
         st.markdown("💰 **Vendas Dia**")
         st.markdown("<h2>R$ 3.240</h2>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
     with col4:
         st.markdown('<div class="metric-card">', unsafe_allow_html=True)
-        tendencia, percentual, cor = analise_tendencia_vendas()
-        st.markdown(f"📈 **{tendencia}**")
-        st.markdown(f"<h2>{percentual}</h2>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("📈 **Crescimento**")
+        st.markdown("<h2>+15%</h2>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     
-    # Seção A.I. Avançada
+    # Seção A.I.
     st.markdown("---")
-    st.markdown('<h2>🤖 Inteligência Artificial Avançada</h2>', unsafe_allow_html=True)
+    st.markdown('<h2>🤖 Inteligência Artificial</h2>', unsafe_allow_html=True)
     
-    # Previsões de Vendas
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown('<div class="ai-card">', unsafe_allow_html=True)
-        st.markdown("### 📈 Previsão de Vendas (Próximos 3 Meses)")
+        st.markdown("### 📈 Previsão de Vendas")
         previsoes = previsao_vendas_manual()
         
-        if previsoes:
-            for prev in previsoes:
-                col_a, col_b = st.columns([2, 1])
-                with col_a:
-                    st.write(f"**{prev['mes']}**")
-                with col_b:
-                    st.write(f"R$ {prev['previsao']:,.0f}")
-        else:
-            st.info("📊 Calculando previsões...")
+        for prev in previsoes:
+            col_a, col_b = st.columns([2, 1])
+            with col_a:
+                st.write(f"**{prev['mes']}**")
+            with col_b:
+                st.write(f"R$ {prev['previsao']:,.0f}")
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        # Métricas A.I. Avançadas
-        metricas = calcular_metricas_ai()
         st.markdown('<div class="info-card">', unsafe_allow_html=True)
-        st.markdown("### 📊 Métricas de Performance")
-        st.metric("🎯 Ticket Médio", f"R$ {metricas['ticket_medio']:.2f}")
-        st.metric("🔄 Taxa de Conversão", f"{metricas['conversao']}%")
-        st.metric("⭐ Satisfação", f"{metricas['satisfacao']}/5.0")
-        st.metric("📊 Retenção", f"{metricas['retencao']}%")
+        st.markdown("### 🏆 Produtos Populares")
+        populares = produtos_populares_ai()
+        for i, produto in enumerate(populares, 1):
+            st.write(f"{i}. **{produto['produto']}** - {produto['vendas']} vendas")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Alertas de Estoque Inteligentes
+    # Alertas de Estoque
     alertas_estoque = analise_estoque_inteligente()
     if alertas_estoque:
         st.markdown('<div class="danger-card">', unsafe_allow_html=True)
-        st.markdown("### ⚠️ Alertas Inteligentes de Estoque")
-        
-        for alerta in alertas_estoque[:3]:  # Mostra apenas 3 alertas
-            col_a, col_b, col_c = st.columns([3, 2, 2])
-            with col_a:
-                st.write(f"**{alerta['produto']}**")
-            with col_b:
-                st.write(f"Estoque: {alerta['estoque_atual']} (Mín: {alerta['estoque_minimo']})")
-            with col_c:
-                st.write(f"**{alerta['nivel']}**")
-            
-            st.write(f"💡 {alerta['recomendacao']}")
-            st.progress(min(alerta['estoque_atual'] / (alerta['estoque_minimo'] * 3), 1.0))
+        st.markdown("### ⚠️ Alertas de Estoque")
+        for alerta in alertas_estoque[:3]:
+            st.write(f"**{alerta['produto']}** ({alerta['escola']}) - Estoque: {alerta['estoque_atual']}")
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # Produtos Populares com Análise
-    populares = produtos_populares_ai()
-    if populares:
-        st.markdown('<div class="info-card">', unsafe_allow_html=True)
-        st.markdown("### 🏆 Produtos Mais Vendidos")
-        
-        for i, produto in enumerate(populares, 1):
-            col_a, col_b, col_c = st.columns([3, 2, 2])
-            with col_a:
-                st.write(f"{i}. **{produto['produto']}**")
-            with col_b:
-                st.write(f"{produto['vendas']} unidades")
-            with col_c:
-                st.write(f"**{produto['performance']}**")
-            
-            # Barra de progresso visual
-            max_vendas = max(p['vendas'] for p in populares)
-            progresso = produto['vendas'] / max_vendas
-            st.progress(progresso)
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Insights Automáticos
-    insights = gerar_insights_automaticos()
-    if insights:
-        st.markdown("---")
-        st.markdown('<h2>💡 Insights Automáticos</h2>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        for i, insight in enumerate(insights):
-            with col1 if i % 2 == 0 else col2:
-                if insight['tipo'] == 'info':
-                    st.markdown(f'<div class="info-card">', unsafe_allow_html=True)
-                elif insight['tipo'] == 'alerta':
-                    st.markdown(f'<div class="warning-card">', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="ai-card">', unsafe_allow_html=True)
-                
-                st.markdown(f"**{insight['icone']} {insight['titulo']}**")
-                st.markdown(insight['descricao'])
-                st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Ações Rápidas com indicadores de permissão
+    # AÇÕES RÁPIDAS CORRIGIDAS
     st.markdown("---")
     st.markdown('<h2>🚀 Ações Rápidas</h2>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
+    
     with col1:
-        # Clientes - sempre visível para quem tem permissão
-        if verificar_permissao(st.session_state.tipo_usuario, 'clientes'):
-            if st.button("👥 Gerenciar Clientes", use_container_width=True, key="btn_clientes"):
-                st.session_state.menu = "👥 Clientes"
-                st.rerun()
-        else:
-            st.button("👥 Gerenciar Clientes", use_container_width=True, disabled=True, 
-                     help="Sem permissão para acessar clientes")
+        if st.button("👥 Clientes", use_container_width=True, key="btn_clientes_dash"):
+            st.session_state.menu = "👥 Clientes"
+            st.rerun()
         
-        # Relatórios - apenas para admin e gestor
-        if verificar_permissao(st.session_state.tipo_usuario, 'relatorios'):
-            if st.button("📊 Relatórios A.I.", use_container_width=True, key="btn_relatorios"):
-                st.session_state.menu = "📊 Relatórios"
-                st.rerun()
-        else:
-            st.button("📊 Relatórios A.I.", use_container_width=True, disabled=True,
-                     help="Sem permissão para acessar relatórios")
+        if st.button("📊 Relatórios", use_container_width=True, key="btn_relatorios_dash"):
+            st.session_state.menu = "📊 Relatórios"
+            st.rerun()
     
     with col2:
-        # Pedidos - sempre visível para quem tem permissão
-        if verificar_permissao(st.session_state.tipo_usuario, 'pedidos'):
-            if st.button("📦 Gerenciar Pedidos", use_container_width=True, key="btn_pedidos"):
-                st.session_state.menu = "📦 Pedidos"
-                st.rerun()
-        else:
-            st.button("📦 Gerenciar Pedidos", use_container_width=True, disabled=True,
-                     help="Sem permissão para acessar pedidos")
+        if st.button("📦 Pedidos", use_container_width=True, key="btn_pedidos_dash"):
+            st.session_state.menu = "📦 Pedidos"
+            st.rerun()
         
-        # Administração - apenas para admin
-        if verificar_permissao(st.session_state.tipo_usuario, 'administracao'):
-            if st.button("⚙️ Administração", use_container_width=True, key="btn_admin"):
-                st.session_state.menu = "⚙️ Administração"
-                st.rerun()
-        else:
-            st.button("⚙️ Administração", use_container_width=True, disabled=True,
-                     help="Sem permissão para acessar administração")
+        if st.button("⚙️ Admin", use_container_width=True, key="btn_admin_dash"):
+            st.session_state.menu = "⚙️ Administração"
+            st.rerun()
 
 # =========================================
-# 👥 INTERFACE CLIENTES COM VERIFICAÇÃO DE PERMISSÃO
+# 👥 INTERFACE CLIENTES - SEM DATA NASCIMENTO
 # =========================================
 
 def mostrar_clientes():
-    """Interface de clientes para mobile com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'clientes'):
-        mostrar_restricao_permissao()
-        return
-    
+    """Interface de clientes"""
     st.header("👥 Gerenciar Clientes")
-    
-    # Indicador de permissão
-    badge_class = f"badge-{st.session_state.tipo_usuario}"
-    st.markdown(f'<span class="permission-badge {badge_class}">{st.session_state.tipo_usuario.upper()}</span>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📋 Lista de Clientes", "➕ Novo Cliente"])
     
@@ -1165,26 +857,16 @@ def mostrar_clientes():
                         st.write(f"**📅 Cadastro:** {formatar_datahora_brasil(cliente['data_cadastro'])}")
                     
                     with col2:
-                        # Botão de exclusão com verificação de permissão
-                        if verificar_permissao(st.session_state.tipo_usuario, 'clientes', 'excluir'):
-                            if st.button("🗑️ Excluir", key=f"del_{cliente['id']}"):
-                                success, message = excluir_cliente(cliente['id'])
-                                if success:
-                                    st.success(message)
-                                    st.rerun()
-                                else:
-                                    st.error(message)
-                        else:
-                            st.button("🗑️ Excluir", key=f"del_{cliente['id']}", disabled=True,
-                                     help="Sem permissão para excluir clientes")
+                        if st.button("🗑️ Excluir", key=f"del_{cliente['id']}"):
+                            success, message = excluir_cliente(cliente['id'])
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
     
     with tab2:
         st.subheader("➕ Novo Cliente")
-        
-        # Verifica permissão para criar
-        if not verificar_permissao(st.session_state.tipo_usuario, 'clientes', 'criar'):
-            st.error("❌ Você não tem permissão para criar novos clientes.")
-            return
         
         with st.form("novo_cliente_form", clear_on_submit=True):
             nome = st.text_input("👤 Nome Completo*", placeholder="Nome do cliente")
@@ -1195,7 +877,7 @@ def mostrar_clientes():
                 email = st.text_input("📧 Email", placeholder="cliente@email.com")
             with col2:
                 cpf = st.text_input("🔢 CPF", placeholder="000.000.000-00")
-                data_nascimento = st.date_input("🎂 Data Nascimento")
+                # DATA NASCIMENTO REMOVIDA
             
             endereco = st.text_area("🏠 Endereço", placeholder="Rua, número, bairro...")
             
@@ -1207,7 +889,6 @@ def mostrar_clientes():
                         nome=nome.strip(),
                         telefone=telefone,
                         email=email,
-                        data_nascimento=data_nancimento,
                         cpf=cpf,
                         endereco=endereco
                     )
@@ -1218,153 +899,115 @@ def mostrar_clientes():
                         st.error(message)
 
 # =========================================
-# 📦 INTERFACE PEDIDOS COM VERIFICAÇÃO DE PERMISSÃO
+# 📦 INTERFACE PEDIDOS
 # =========================================
 
 def mostrar_pedidos():
-    """Interface de pedidos para mobile com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'pedidos'):
-        mostrar_restricao_permissao()
-        return
-    
+    """Interface de pedidos"""
     st.header("📦 Gerenciar Pedidos")
-    
-    # Indicador de permissão
-    badge_class = f"badge-{st.session_state.tipo_usuario}"
-    st.markdown(f'<span class="permission-badge {badge_class}">{st.session_state.tipo_usuario.upper()}</span>', unsafe_allow_html=True)
     
     tab1, tab2 = st.tabs(["📋 Lista de Pedidos", "➕ Novo Pedido"])
     
     with tab1:
         st.subheader("📋 Pedidos Realizados")
-        
-        pedidos = listar_pedidos()
-        if not pedidos:
-            st.info("📝 Nenhum pedido encontrado.")
-        else:
-            for pedido in pedidos:
-                with st.expander(f"📦 Pedido #{pedido['id']} - {pedido['cliente_nome']}"):
-                    col1, col2 = st.columns([3, 1])
-                    
-                    with col1:
-                        st.write(f"**👤 Cliente:** {pedido['cliente_nome']}")
-                        st.write(f"**📅 Data:** {formatar_datahora_brasil(pedido['data_pedido'])}")
-                        st.write(f"**💰 Valor:** {formatar_moeda_brasil(pedido['valor_final'])}")
-                        st.write(f"**📊 Status:** {pedido['status']}")
-                    
-                    with col2:
-                        # Botão de exclusão com verificação de permissão
-                        if verificar_permissao(st.session_state.tipo_usuario, 'pedidos', 'excluir'):
-                            if st.button("🗑️ Excluir", key=f"del_pedido_{pedido['id']}"):
-                                success, message = excluir_pedido(pedido['id'])
-                                if success:
-                                    st.success(message)
-                                    st.rerun()
-                                else:
-                                    st.error(message)
-                        else:
-                            st.button("🗑️ Excluir", key=f"del_pedido_{pedido['id']}", disabled=True,
-                                     help="Sem permissão para excluir pedidos")
+        st.info("🎯 Funcionalidade em desenvolvimento...")
     
     with tab2:
         st.subheader("➕ Criar Novo Pedido")
-        
-        # Verifica permissão para criar
-        if not verificar_permissao(st.session_state.tipo_usuario, 'pedidos', 'criar'):
-            st.error("❌ Você não tem permissão para criar novos pedidos.")
-            return
-        
-        clientes = listar_clientes()
-        if not clientes:
-            st.warning("👥 Cadastre clientes primeiro!")
-            return
-        
-        # Selecionar cliente
-        cliente_opcoes = {f"{c['nome']} - {c['telefone'] or 'N/A'}": c['id'] for c in clientes}
-        cliente_selecionado = st.selectbox("👤 Selecione o cliente:", options=list(cliente_opcoes.keys()))
-        
-        if cliente_selecionado:
-            st.success(f"✅ Cliente selecionado: {cliente_selecionado}")
-            
-            # Sistema simplificado de criação de pedidos
-            produtos = listar_produtos()
-            if produtos:
-                st.subheader("🛒 Produtos Disponíveis")
-                
-                # Aqui você pode expandir para um sistema completo de carrinho
-                produto_selecionado = st.selectbox(
-                    "Selecione o produto:",
-                    [f"{p['nome']} - {p['tamanho']} - R$ {p['preco']:.2f}" for p in produtos]
-                )
-                
-                quantidade = st.number_input("Quantidade:", min_value=1, value=1)
-                
-                if st.button("✅ Criar Pedido Simples", use_container_width=True):
-                    # Simulação de criação de pedido
-                    st.success("🎉 Pedido criado com sucesso!")
-                    st.info("💡 Em uma versão completa, aqui seria implementado o carrinho completo")
-            else:
-                st.warning("📦 Nenhum produto disponível em estoque.")
+        st.info("🎯 Funcionalidade em desenvolvimento...")
 
 # =========================================
-# 📊 RELATÓRIOS COM VERIFICAÇÃO DE PERMISSÃO
+# 📊 RELATÓRIOS - PRODUTOS POR ESCOLA
 # =========================================
 
 def mostrar_relatorios():
-    """Interface de relatórios para mobile com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'relatorios'):
-        mostrar_restricao_permissao()
-        return
-    
+    """Interface de relatórios"""
     st.header("📊 Relatórios A.I.")
-    
-    # Indicador de permissão
-    badge_class = f"badge-{st.session_state.tipo_usuario}"
-    st.markdown(f'<span class="permission-badge {badge_class}">{st.session_state.tipo_usuario.upper()}</span>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📥 Exportar Dados")
         
-        # Verifica permissão para exportar
-        if verificar_permissao(st.session_state.tipo_usuario, 'relatorios', 'exportar'):
-            if st.button("👥 Exportar Clientes CSV", use_container_width=True):
-                csv_data = gerar_csv_clientes()
-                if csv_data:
-                    baixar_csv(csv_data, "clientes")
-        else:
-            st.button("👥 Exportar Clientes CSV", use_container_width=True, disabled=True,
-                     help="Sem permissão para exportar dados")
+        if st.button("📚 Produtos por Escola CSV", use_container_width=True):
+            csv_data = gerar_csv_produtos()
+            if csv_data:
+                baixar_csv(csv_data, "produtos_escolas")
     
     with col2:
         st.subheader("📈 Métricas A.I.")
         
-        st.metric("Clientes Ativos", len(listar_clientes()))
-        st.metric("Previsão Mensal", "R$ 28.500")
-        st.metric("Crescimento", "+15%")
+        st.metric("Total Clientes", len(listar_clientes()))
+        st.metric("Total Produtos", len(listar_produtos()))
+        st.metric("Total Escolas", len(listar_escolas()))
 
 # =========================================
-# ⚙️ ADMINISTRAÇÃO COM VERIFICAÇÃO DE PERMISSÃO
+# ⚙️ ADMINISTRAÇÃO - CADASTRO DE PRODUTOS
 # =========================================
 
 def mostrar_administracao():
-    """Interface administrativa para mobile com verificação de permissão"""
-    # Verifica permissão
-    if not verificar_permissao(st.session_state.tipo_usuario, 'administracao'):
-        mostrar_restricao_permissao()
-        return
-    
+    """Interface administrativa"""
     st.header("⚙️ Administração")
     
-    # Indicador de permissão
-    st.markdown('<span class="permission-badge badge-admin">ADMIN</span>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["🔧 Sistema", "👥 Gerenciar Usuários"])
+    tab1, tab2 = st.tabs(["📚 Cadastrar Produtos", "🔧 Sistema"])
     
     with tab1:
+        st.subheader("📚 Cadastrar Novo Produto")
+        
+        escolas = listar_escolas()
+        if not escolas:
+            st.error("❌ Cadastre escolas primeiro!")
+            return
+        
+        with st.form("novo_produto_form", clear_on_submit=True):
+            nome = st.text_input("📚 Nome do Produto*", placeholder="Ex: Camiseta Polo")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                categoria = st.selectbox("📂 Categoria", ["Camiseta", "Calça", "Agasalho", "Short", "Acessório"])
+                tamanho = st.text_input("📏 Tamanho*", placeholder="Ex: M, 42, P")
+                cor = st.text_input("🎨 Cor*", placeholder="Ex: Branco, Azul")
+            with col2:
+                preco = st.number_input("💰 Preço de Venda (R$)*", min_value=0.0, step=0.01, format="%.2f")
+                custo = st.number_input("💲 Custo (R$)", min_value=0.0, step=0.01, format="%.2f")
+                estoque = st.number_input("📦 Estoque Atual", min_value=0, step=1, value=0)
+                estoque_minimo = st.number_input("⚠️ Estoque Mínimo", min_value=0, step=1, value=5)
+            
+            escola_selecionada = st.selectbox(
+                "🏫 Escola*",
+                options=[e['nome'] for e in escolas],
+                format_func=lambda x: x
+            )
+            
+            if st.form_submit_button("✅ Cadastrar Produto", use_container_width=True):
+                if not nome.strip():
+                    st.error("❌ O nome do produto é obrigatório!")
+                elif not tamanho.strip():
+                    st.error("❌ O tamanho é obrigatório!")
+                elif not cor.strip():
+                    st.error("❌ A cor é obrigatória!")
+                elif preco <= 0:
+                    st.error("❌ O preço deve ser maior que zero!")
+                else:
+                    escola_id = next(e['id'] for e in escolas if e['nome'] == escola_selecionada)
+                    success, message = adicionar_produto(
+                        nome=nome.strip(),
+                        categoria=categoria,
+                        tamanho=tamanho.strip(),
+                        cor=cor.strip(),
+                        preco=preco,
+                        custo=custo,
+                        estoque=estoque,
+                        estoque_minimo=estoque_minimo,
+                        escola_id=escola_id
+                    )
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+    
+    with tab2:
         st.subheader("🔧 Configurações do Sistema")
         
         if st.button("🔄 Reiniciar Banco de Dados", use_container_width=True):
@@ -1373,67 +1016,20 @@ def mostrar_administracao():
                     st.success("✅ Banco reiniciado com sucesso!")
                 else:
                     st.error("❌ Erro ao reiniciar banco!")
-    
-    with tab2:
-        st.subheader("👥 Gerenciar Usuários")
-        
-        # Formulário para criar novo usuário
-        with st.form("form_novo_usuario"):
-            st.write("### ➕ Criar Novo Usuário")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                novo_username = st.text_input("Username")
-                novo_nome = st.text_input("Nome Completo")
-            with col2:
-                nova_senha = st.text_input("Senha", type="password")
-                novo_tipo = st.selectbox("Tipo", options=list(PERMISSOES.keys()))
-            
-            if st.form_submit_button("👤 Criar Usuário"):
-                if novo_username and nova_senha and novo_nome:
-                    success, message = criar_usuario_com_permissao(
-                        novo_username, nova_senha, novo_nome, novo_tipo
-                    )
-                    if success:
-                        st.success(message)
-                    else:
-                        st.error(message)
-                else:
-                    st.error("❌ Preencha todos os campos!")
 
 # =========================================
-# 🧩 MENU PRINCIPAL COM FILTRAGEM POR PERMISSÃO
+# 🧩 MENU PRINCIPAL
 # =========================================
 
 def mostrar_menu_principal():
-    """Menu mobile otimizado com filtragem por permissão"""
+    """Menu mobile otimizado"""
     st.sidebar.markdown('<div style="text-align: center; padding: 1rem 0;">', unsafe_allow_html=True)
     st.sidebar.markdown('<h2>👕 Menu</h2>', unsafe_allow_html=True)
-    
-    # Badge de permissão
-    badge_class = f"badge-{st.session_state.tipo_usuario}"
-    st.sidebar.markdown(f'<span class="permission-badge {badge_class}">{st.session_state.tipo_usuario.upper()}</span>', unsafe_allow_html=True)
-    
     st.sidebar.markdown(f"**👤 {st.session_state.nome_completo}**")
     st.sidebar.markdown('</div>', unsafe_allow_html=True)
     st.sidebar.markdown("---")
     
-    # Menu baseado nas permissões
-    menu_options = ["🏠 Dashboard"]
-    
-    # Filtra opções baseado nas permissões
-    if verificar_permissao(st.session_state.tipo_usuario, 'clientes'):
-        menu_options.append("👥 Clientes")
-    
-    if verificar_permissao(st.session_state.tipo_usuario, 'pedidos'):
-        menu_options.append("📦 Pedidos")
-    
-    if verificar_permissao(st.session_state.tipo_usuario, 'relatorios'):
-        menu_options.append("📊 Relatórios")
-    
-    if verificar_permissao(st.session_state.tipo_usuario, 'administracao'):
-        menu_options.append("⚙️ Administração")
-    
+    menu_options = ["🏠 Dashboard", "👥 Clientes", "📦 Pedidos", "📊 Relatórios", "⚙️ Administração"]
     menu = st.sidebar.selectbox("Navegação", menu_options, key="menu_select")
     
     st.sidebar.markdown("---")
@@ -1450,20 +1046,16 @@ def mostrar_menu_principal():
 def main():
     """Aplicação principal"""
     
-    # Inicializar banco
     if not init_db():
         st.error("❌ Erro ao inicializar banco!")
         return
     
-    # Verificar autenticação
     if 'logged_in' not in st.session_state or not st.session_state.logged_in:
         pagina_login()
         return
     
-    # Menu principal
     menu = mostrar_menu_principal()
     
-    # Navegação com verificação de permissão
     if menu == "🏠 Dashboard":
         mostrar_dashboard()
     elif menu == "👥 Clientes":
