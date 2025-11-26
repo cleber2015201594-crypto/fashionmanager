@@ -3,10 +3,12 @@ from datetime import datetime, date, timedelta
 import json
 import os
 import hashlib
-import sqlite3
 import csv
 from io import StringIO
 import pytz
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import urllib.parse
 
 # Configuração da página
 st.set_page_config(
@@ -15,6 +17,29 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Função para conexão com PostgreSQL
+def get_db_connection():
+    database_url = os.environ.get('DATABASE_URL')
+    
+    if database_url:
+        # Parse da URL do PostgreSQL
+        urllib.parse.uses_netloc.append("postgres")
+        url = urllib.parse.urlparse(database_url)
+        
+        conn = psycopg2.connect(
+            database=url.path[1:],
+            user=url.username,
+            password=url.password,
+            host=url.hostname,
+            port=url.port,
+            sslmode='require'
+        )
+        return conn
+    else:
+        # Fallback para SQLite local (desenvolvimento)
+        import sqlite3
+        return sqlite3.connect('gestao.db')
 
 # Função para obter data/hora do Brasil
 def get_brasil_datetime():
@@ -32,415 +57,640 @@ def format_date_br(dt):
 
 # Sistema de Autenticação
 def init_db():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
     
-    # Tabela de usuários
-    c.execute('''CREATE TABLE IF NOT EXISTS usuarios
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  username TEXT UNIQUE,
-                  password TEXT,
-                  nivel TEXT,
-                  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Tabela de clientes
-    c.execute('''CREATE TABLE IF NOT EXISTS clientes
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  nome TEXT NOT NULL,
-                  telefone TEXT,
-                  email TEXT,
-                  cpf TEXT,
-                  endereco TEXT,
-                  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Tabela de escolas
-    c.execute('''CREATE TABLE IF NOT EXISTS escolas
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  nome TEXT,
-                  telefone TEXT,
-                  email TEXT,
-                  endereco TEXT,
-                  responsavel TEXT,
-                  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Tabela de produtos
-    c.execute('''CREATE TABLE IF NOT EXISTS produtos
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  nome TEXT,
-                  descricao TEXT,
-                  preco REAL,
-                  custo REAL,
-                  estoque_minimo INTEGER,
-                  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    # Tabela de estoque por escola
-    c.execute('''CREATE TABLE IF NOT EXISTS estoque_escolas
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  escola_id INTEGER,
-                  produto_id INTEGER,
-                  quantidade INTEGER,
-                  FOREIGN KEY(escola_id) REFERENCES escolas(id),
-                  FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
-    
-    # Tabela de pedidos
-    c.execute('''CREATE TABLE IF NOT EXISTS pedidos
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  cliente_id INTEGER,
-                  escola_id INTEGER,
-                  status TEXT,
-                  total REAL,
-                  desconto REAL,
-                  custo_total REAL,
-                  lucro_total REAL,
-                  margem_lucro REAL,
-                  criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  FOREIGN KEY(cliente_id) REFERENCES clientes(id),
-                  FOREIGN KEY(escola_id) REFERENCES escolas(id))''')
-    
-    # Tabela de itens do pedido
-    c.execute('''CREATE TABLE IF NOT EXISTS itens_pedido
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  pedido_id INTEGER,
-                  produto_id INTEGER,
-                  quantidade INTEGER,
-                  preco_unitario REAL,
-                  custo_unitario REAL,
-                  lucro_unitario REAL,
-                  margem_lucro REAL,
-                  FOREIGN KEY(pedido_id) REFERENCES pedidos(id),
-                  FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
-    
-    # Inserir usuário admin padrão se não existir
-    c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
-    if c.fetchone()[0] == 0:
-        senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
-        c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (?, ?, ?)",
-                 ('admin', senha_hash, 'admin'))
-    
-    conn.commit()
-    conn.close()
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            
+            # Tabela de usuários
+            c.execute('''CREATE TABLE IF NOT EXISTS usuarios
+                         (id SERIAL PRIMARY KEY,
+                          username TEXT UNIQUE,
+                          password TEXT,
+                          nivel TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            # Tabela de clientes
+            c.execute('''CREATE TABLE IF NOT EXISTS clientes
+                         (id SERIAL PRIMARY KEY,
+                          nome TEXT NOT NULL,
+                          telefone TEXT,
+                          email TEXT,
+                          cpf TEXT,
+                          endereco TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            # Tabela de escolas
+            c.execute('''CREATE TABLE IF NOT EXISTS escolas
+                         (id SERIAL PRIMARY KEY,
+                          nome TEXT,
+                          telefone TEXT,
+                          email TEXT,
+                          endereco TEXT,
+                          responsavel TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            # Tabela de produtos
+            c.execute('''CREATE TABLE IF NOT EXISTS produtos
+                         (id SERIAL PRIMARY KEY,
+                          nome TEXT NOT NULL,
+                          descricao TEXT,
+                          preco DECIMAL(10,2),
+                          custo DECIMAL(10,2),
+                          estoque_minimo INTEGER,
+                          tamanho TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                          UNIQUE(nome, tamanho))''')
+            
+            # Tabela de estoque por escola
+            c.execute('''CREATE TABLE IF NOT EXISTS estoque_escolas
+                         (id SERIAL PRIMARY KEY,
+                          escola_id INTEGER REFERENCES escolas(id),
+                          produto_id INTEGER REFERENCES produtos(id),
+                          quantidade INTEGER DEFAULT 0,
+                          UNIQUE(escola_id, produto_id))''')
+            
+            # Tabela de pedidos
+            c.execute('''CREATE TABLE IF NOT EXISTS pedidos
+                         (id SERIAL PRIMARY KEY,
+                          cliente_id INTEGER REFERENCES clientes(id),
+                          escola_id INTEGER REFERENCES escolas(id),
+                          status TEXT DEFAULT 'Pendente',
+                          total DECIMAL(10,2),
+                          desconto DECIMAL(5,2) DEFAULT 0,
+                          custo_total DECIMAL(10,2),
+                          lucro_total DECIMAL(10,2),
+                          margem_lucro DECIMAL(5,2),
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            # Tabela de itens do pedido
+            c.execute('''CREATE TABLE IF NOT EXISTS itens_pedido
+                         (id SERIAL PRIMARY KEY,
+                          pedido_id INTEGER REFERENCES pedidos(id),
+                          produto_id INTEGER REFERENCES produtos(id),
+                          quantidade INTEGER,
+                          preco_unitario DECIMAL(10,2),
+                          custo_unitario DECIMAL(10,2),
+                          lucro_unitario DECIMAL(10,2),
+                          margem_lucro DECIMAL(5,2))''')
+            
+            # Inserir usuário admin padrão se não existir
+            c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
+            if c.fetchone()[0] == 0:
+                senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
+                c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (%s, %s, %s)",
+                         ('admin', senha_hash, 'admin'))
+            
+            conn.commit()
+            c.close()
+            
+        else:
+            # SQLite para desenvolvimento
+            c = conn.cursor()
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS usuarios
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          username TEXT UNIQUE,
+                          password TEXT,
+                          nivel TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS clientes
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          nome TEXT NOT NULL,
+                          telefone TEXT,
+                          email TEXT,
+                          cpf TEXT,
+                          endereco TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS escolas
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          nome TEXT,
+                          telefone TEXT,
+                          email TEXT,
+                          endereco TEXT,
+                          responsavel TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS produtos
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          nome TEXT NOT NULL,
+                          descricao TEXT,
+                          preco REAL,
+                          custo REAL,
+                          estoque_minimo INTEGER,
+                          tamanho TEXT,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                          UNIQUE(nome, tamanho))''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS estoque_escolas
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          escola_id INTEGER,
+                          produto_id INTEGER,
+                          quantidade INTEGER DEFAULT 0,
+                          FOREIGN KEY(escola_id) REFERENCES escolas(id),
+                          FOREIGN KEY(produto_id) REFERENCES produtos(id),
+                          UNIQUE(escola_id, produto_id))''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS pedidos
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          cliente_id INTEGER,
+                          escola_id INTEGER,
+                          status TEXT DEFAULT 'Pendente',
+                          total REAL,
+                          desconto REAL DEFAULT 0,
+                          custo_total REAL,
+                          lucro_total REAL,
+                          margem_lucro REAL,
+                          criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                          FOREIGN KEY(cliente_id) REFERENCES clientes(id),
+                          FOREIGN KEY(escola_id) REFERENCES escolas(id))''')
+            
+            c.execute('''CREATE TABLE IF NOT EXISTS itens_pedido
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          pedido_id INTEGER,
+                          produto_id INTEGER,
+                          quantidade INTEGER,
+                          preco_unitario REAL,
+                          custo_unitario REAL,
+                          lucro_unitario REAL,
+                          margem_lucro REAL,
+                          FOREIGN KEY(pedido_id) REFERENCES pedidos(id),
+                          FOREIGN KEY(produto_id) REFERENCES produtos(id))''')
+            
+            c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
+            if c.fetchone()[0] == 0:
+                senha_hash = hashlib.sha256("admin123".encode()).hexdigest()
+                c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (?, ?, ?)",
+                         ('admin', senha_hash, 'admin'))
+            
+            conn.commit()
+            
+    except Exception as e:
+        st.error(f"Erro ao inicializar banco de dados: {e}")
+    finally:
+        conn.close()
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_login(username, password):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM usuarios WHERE username=?", (username,))
-    user = c.fetchone()
-    conn.close()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
     
-    if user and user[2] == hash_password(password):
-        return user
-    return None
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("SELECT * FROM usuarios WHERE username=%s", (username,))
+            user = c.fetchone()
+        else:
+            c = conn.cursor()
+            c.execute("SELECT * FROM usuarios WHERE username=?", (username,))
+            user = c.fetchone()
+        
+        if user and user[2] == hash_password(password):
+            return user
+        return None
+    except Exception as e:
+        st.error(f"Erro ao verificar login: {e}")
+        return None
+    finally:
+        conn.close()
 
 # Funções de Gestão de Clientes
 def add_cliente(nome, telefone, email, cpf, endereco):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
     try:
-        c.execute('''INSERT INTO clientes (nome, telefone, email, cpf, endereco)
-                     VALUES (?, ?, ?, ?, ?)''', (nome, telefone, email, cpf, endereco))
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''INSERT INTO clientes (nome, telefone, email, cpf, endereco)
+                         VALUES (%s, %s, %s, %s, %s)''', 
+                     (nome, telefone, email, cpf, endereco))
+        else:
+            c = conn.cursor()
+            c.execute('''INSERT INTO clientes (nome, telefone, email, cpf, endereco)
+                         VALUES (?, ?, ?, ?, ?)''', 
+                     (nome, telefone, email, cpf, endereco))
+        
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao cadastrar cliente: {e}")
         return False
     finally:
         conn.close()
 
 def get_clientes():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM clientes ORDER BY nome")
-    clientes = c.fetchall()
-    conn.close()
-    return clientes
-
-def update_cliente(cliente_id, nome, telefone, email, cpf, endereco):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''UPDATE clientes SET nome=?, telefone=?, email=?, cpf=?, endereco=?
-                 WHERE id=?''', (nome, telefone, email, cpf, endereco, cliente_id))
-    conn.commit()
-    conn.close()
-
-def delete_cliente(cliente_id):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM clientes WHERE id=?", (cliente_id,))
-    conn.commit()
-    conn.close()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("SELECT * FROM clientes ORDER BY nome")
+        else:
+            c = conn.cursor()
+            c.execute("SELECT * FROM clientes ORDER BY nome")
+        
+        clientes = c.fetchall()
+        return clientes
+    except Exception as e:
+        st.error(f"Erro ao buscar clientes: {e}")
+        return []
+    finally:
+        conn.close()
 
 # Funções de Gestão de Escolas
 def add_escola(nome, telefone, email, endereco, responsavel):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''INSERT INTO escolas (nome, telefone, email, endereco, responsavel)
-                 VALUES (?, ?, ?, ?, ?)''', (nome, telefone, email, endereco, responsavel))
-    conn.commit()
-    conn.close()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''INSERT INTO escolas (nome, telefone, email, endereco, responsavel)
+                         VALUES (%s, %s, %s, %s, %s)''', 
+                     (nome, telefone, email, endereco, responsavel))
+        else:
+            c = conn.cursor()
+            c.execute('''INSERT INTO escolas (nome, telefone, email, endereco, responsavel)
+                         VALUES (?, ?, ?, ?, ?)''', 
+                     (nome, telefone, email, endereco, responsavel))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao cadastrar escola: {e}")
+        return False
+    finally:
+        conn.close()
 
 def get_escolas():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM escolas ORDER BY nome")
-    escolas = c.fetchall()
-    conn.close()
-    return escolas
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("SELECT * FROM escolas ORDER BY nome")
+        else:
+            c = conn.cursor()
+            c.execute("SELECT * FROM escolas ORDER BY nome")
+        
+        escolas = c.fetchall()
+        return escolas
+    except Exception as e:
+        st.error(f"Erro ao buscar escolas: {e}")
+        return []
+    finally:
+        conn.close()
 
 # Funções de Gestão de Produtos
-def add_produto(nome, descricao, preco, custo, estoque_minimo):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''INSERT INTO produtos (nome, descricao, preco, custo, estoque_minimo)
-                 VALUES (?, ?, ?, ?, ?)''', (nome, descricao, preco, custo, estoque_minimo))
-    produto_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return produto_id
+def add_produto(nome, descricao, preco, custo, estoque_minimo, tamanho):
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            # Verificar se produto já existe
+            c.execute("SELECT id FROM produtos WHERE nome=%s AND tamanho=%s", (nome, tamanho))
+            if c.fetchone():
+                return False, "Já existe um produto com este nome e tamanho"
+            
+            c.execute('''INSERT INTO produtos (nome, descricao, preco, custo, estoque_minimo, tamanho)
+                         VALUES (%s, %s, %s, %s, %s, %s) RETURNING id''', 
+                     (nome, descricao, preco, custo, estoque_minimo, tamanho))
+            produto_id = c.fetchone()[0]
+        else:
+            c = conn.cursor()
+            c.execute("SELECT id FROM produtos WHERE nome=? AND tamanho=?", (nome, tamanho))
+            if c.fetchone():
+                return False, "Já existe um produto com este nome e tamanho"
+            
+            c.execute('''INSERT INTO produtos (nome, descricao, preco, custo, estoque_minimo, tamanho)
+                         VALUES (?, ?, ?, ?, ?, ?)''', 
+                     (nome, descricao, preco, custo, estoque_minimo, tamanho))
+            produto_id = c.lastrowid
+        
+        conn.commit()
+        return True, produto_id
+    except Exception as e:
+        conn.rollback()
+        error_msg = f"Erro ao cadastrar produto: {e}"
+        st.error(error_msg)
+        return False, error_msg
+    finally:
+        conn.close()
 
 def get_produtos():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("SELECT * FROM produtos ORDER BY nome")
-    produtos = c.fetchall()
-    conn.close()
-    return produtos
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("SELECT * FROM produtos ORDER BY nome, tamanho")
+        else:
+            c = conn.cursor()
+            c.execute("SELECT * FROM produtos ORDER BY nome, tamanho")
+        
+        produtos = c.fetchall()
+        return produtos
+    except Exception as e:
+        st.error(f"Erro ao buscar produtos: {e}")
+        return []
+    finally:
+        conn.close()
 
-def update_produto(produto_id, nome, descricao, preco, custo, estoque_minimo):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''UPDATE produtos SET nome=?, descricao=?, preco=?, custo=?, estoque_minimo=?
-                 WHERE id=?''', (nome, descricao, preco, custo, estoque_minimo, produto_id))
-    conn.commit()
-    conn.close()
+# Funções de Gestão de Estoque
+def vincular_produto_todas_escolas(produto_id, quantidade_inicial=0):
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        escolas = get_escolas()
+        if is_postgres:
+            c = conn.cursor()
+            for escola in escolas:
+                c.execute('''INSERT INTO estoque_escolas (escola_id, produto_id, quantidade)
+                             VALUES (%s, %s, %s)
+                             ON CONFLICT (escola_id, produto_id) DO NOTHING''', 
+                         (escola[0], produto_id, quantidade_inicial))
+        else:
+            c = conn.cursor()
+            for escola in escolas:
+                c.execute('''INSERT OR IGNORE INTO estoque_escolas (escola_id, produto_id, quantidade)
+                             VALUES (?, ?, ?)''', 
+                         (escola[0], produto_id, quantidade_inicial))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao vincular produto: {e}")
+        return False
+    finally:
+        conn.close()
 
-def delete_produto(produto_id):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM produtos WHERE id=?", (produto_id,))
-    c.execute("DELETE FROM estoque_escolas WHERE produto_id=?", (produto_id,))
-    conn.commit()
-    conn.close()
-
-# Funções de Gestão de Estoque por Escola
 def get_estoque_escola(escola_id):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''SELECT e.id, p.nome, e.quantidade, p.estoque_minimo, p.preco, p.custo, p.id as produto_id
-                 FROM estoque_escolas e
-                 JOIN produtos p ON e.produto_id = p.id
-                 WHERE e.escola_id = ?''', (escola_id,))
-    estoque = c.fetchall()
-    conn.close()
-    return estoque
-
-def get_estoque_produto_escola(escola_id, produto_id):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''SELECT quantidade FROM estoque_escolas 
-                 WHERE escola_id = ? AND produto_id = ?''', (escola_id, produto_id))
-    resultado = c.fetchone()
-    conn.close()
-    return resultado[0] if resultado else 0
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''SELECT e.id, p.nome, p.tamanho, e.quantidade, p.estoque_minimo, 
+                                p.preco, p.custo, p.id as produto_id
+                         FROM estoque_escolas e
+                         JOIN produtos p ON e.produto_id = p.id
+                         WHERE e.escola_id = %s
+                         ORDER BY p.nome, p.tamanho''', (escola_id,))
+        else:
+            c = conn.cursor()
+            c.execute('''SELECT e.id, p.nome, p.tamanho, e.quantidade, p.estoque_minimo, 
+                                p.preco, p.custo, p.id as produto_id
+                         FROM estoque_escolas e
+                         JOIN produtos p ON e.produto_id = p.id
+                         WHERE e.escola_id = ?
+                         ORDER BY p.nome, p.tamanho''', (escola_id,))
+        
+        estoque = c.fetchall()
+        return estoque
+    except Exception as e:
+        st.error(f"Erro ao buscar estoque: {e}")
+        return []
+    finally:
+        conn.close()
 
 def update_estoque_escola(escola_id, produto_id, quantidade):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
     
-    # Verificar se já existe estoque para esta escola/produto
-    c.execute('''SELECT id FROM estoque_escolas 
-                 WHERE escola_id = ? AND produto_id = ?''', (escola_id, produto_id))
-    existe = c.fetchone()
-    
-    if existe:
-        c.execute('''UPDATE estoque_escolas SET quantidade = ?
-                     WHERE escola_id = ? AND produto_id = ?''', 
-                  (quantidade, escola_id, produto_id))
-    else:
-        c.execute('''INSERT INTO estoque_escolas (escola_id, produto_id, quantidade)
-                     VALUES (?, ?, ?)''', (escola_id, produto_id, quantidade))
-    
-    conn.commit()
-    conn.close()
-
-# Função para vincular produto a todas as escolas automaticamente
-def vincular_produto_todas_escolas(produto_id, quantidade_inicial=0):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    
-    # Buscar todas as escolas
-    c.execute("SELECT id FROM escolas")
-    escolas = c.fetchall()
-    
-    # Vincular produto a cada escola
-    for escola in escolas:
-        escola_id = escola[0]
-        c.execute('''INSERT OR REPLACE INTO estoque_escolas (escola_id, produto_id, quantidade)
-                     VALUES (?, ?, ?)''', (escola_id, produto_id, quantidade_inicial))
-    
-    conn.commit()
-    conn.close()
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''INSERT INTO estoque_escolas (escola_id, produto_id, quantidade)
+                         VALUES (%s, %s, %s)
+                         ON CONFLICT (escola_id, produto_id) 
+                         DO UPDATE SET quantidade = EXCLUDED.quantidade''', 
+                     (escola_id, produto_id, quantidade))
+        else:
+            c = conn.cursor()
+            c.execute('''INSERT OR REPLACE INTO estoque_escolas (escola_id, produto_id, quantidade)
+                         VALUES (?, ?, ?)''', 
+                     (escola_id, produto_id, quantidade))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar estoque: {e}")
+        return False
+    finally:
+        conn.close()
 
 # Funções de Gestão de Pedidos
 def add_pedido(cliente_id, escola_id, itens, desconto=0):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
     
-    # Calcular totais
-    total_venda = sum(item['quantidade'] * item['preco'] for item in itens)
-    total_custo = sum(item['quantidade'] * item['custo'] for item in itens)
-    total_com_desconto = total_venda - (total_venda * desconto / 100)
-    lucro_total = total_com_desconto - total_custo
-    margem_lucro = (lucro_total / total_com_desconto * 100) if total_com_desconto > 0 else 0
-    
-    # Inserir pedido
-    c.execute('''INSERT INTO pedidos (cliente_id, escola_id, status, total, desconto, custo_total, lucro_total, margem_lucro)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', 
-              (cliente_id, escola_id, 'Pendente', total_com_desconto, desconto, total_custo, lucro_total, margem_lucro))
-    
-    pedido_id = c.lastrowid
-    
-    # Inserir itens do pedido e atualizar estoque
-    for item in itens:
-        lucro_unitario = item['preco'] - item['custo']
-        margem_unitario = (lucro_unitario / item['preco'] * 100) if item['preco'] > 0 else 0
+    try:
+        # Calcular totais
+        total_venda = sum(item['quantidade'] * item['preco'] for item in itens)
+        total_custo = sum(item['quantidade'] * item['custo'] for item in itens)
+        total_com_desconto = total_venda - (total_venda * desconto / 100)
+        lucro_total = total_com_desconto - total_custo
+        margem_lucro = (lucro_total / total_com_desconto * 100) if total_com_desconto > 0 else 0
         
-        c.execute('''INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario, custo_unitario, lucro_unitario, margem_lucro)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)''', 
-                  (pedido_id, item['produto_id'], item['quantidade'], item['preco'], item['custo'], lucro_unitario, margem_unitario))
+        if is_postgres:
+            c = conn.cursor()
+            # Inserir pedido
+            c.execute('''INSERT INTO pedidos (cliente_id, escola_id, total, desconto, custo_total, lucro_total, margem_lucro)
+                         VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id''', 
+                     (cliente_id, escola_id, total_com_desconto, desconto, total_custo, lucro_total, margem_lucro))
+            pedido_id = c.fetchone()[0]
+            
+            # Inserir itens e atualizar estoque
+            for item in itens:
+                lucro_unitario = item['preco'] - item['custo']
+                margem_unitario = (lucro_unitario / item['preco'] * 100) if item['preco'] > 0 else 0
+                
+                c.execute('''INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario, custo_unitario, lucro_unitario, margem_lucro)
+                             VALUES (%s, %s, %s, %s, %s, %s, %s)''', 
+                         (pedido_id, item['produto_id'], item['quantidade'], item['preco'], item['custo'], lucro_unitario, margem_unitario))
+                
+                # Atualizar estoque
+                c.execute('''UPDATE estoque_escolas 
+                             SET quantidade = quantidade - %s
+                             WHERE escola_id = %s AND produto_id = %s''', 
+                         (item['quantidade'], escola_id, item['produto_id']))
+        else:
+            c = conn.cursor()
+            c.execute('''INSERT INTO pedidos (cliente_id, escola_id, total, desconto, custo_total, lucro_total, margem_lucro)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)''', 
+                     (cliente_id, escola_id, total_com_desconto, desconto, total_custo, lucro_total, margem_lucro))
+            pedido_id = c.lastrowid
+            
+            for item in itens:
+                lucro_unitario = item['preco'] - item['custo']
+                margem_unitario = (lucro_unitario / item['preco'] * 100) if item['preco'] > 0 else 0
+                
+                c.execute('''INSERT INTO itens_pedido (pedido_id, produto_id, quantidade, preco_unitario, custo_unitario, lucro_unitario, margem_lucro)
+                             VALUES (?, ?, ?, ?, ?, ?, ?)''', 
+                         (pedido_id, item['produto_id'], item['quantidade'], item['preco'], item['custo'], lucro_unitario, margem_unitario))
+                
+                c.execute('''UPDATE estoque_escolas 
+                             SET quantidade = quantidade - ?
+                             WHERE escola_id = ? AND produto_id = ?''', 
+                         (item['quantidade'], escola_id, item['produto_id']))
         
-        # Atualizar estoque - reduzir quantidade
-        estoque_atual = get_estoque_produto_escola(escola_id, item['produto_id'])
-        nova_quantidade = estoque_atual - item['quantidade']
-        update_estoque_escola(escola_id, item['produto_id'], nova_quantidade)
-    
-    conn.commit()
-    conn.close()
-    return pedido_id
+        conn.commit()
+        return pedido_id
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao criar pedido: {e}")
+        return None
+    finally:
+        conn.close()
 
 def get_pedidos():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''SELECT p.*, c.nome as cliente_nome, e.nome as escola_nome 
-                 FROM pedidos p
-                 LEFT JOIN clientes c ON p.cliente_id = c.id
-                 LEFT JOIN escolas e ON p.escola_id = e.id
-                 ORDER BY p.criado_em DESC''')
-    pedidos = c.fetchall()
-    conn.close()
-    return pedidos
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''SELECT p.*, c.nome as cliente_nome, e.nome as escola_nome 
+                         FROM pedidos p
+                         LEFT JOIN clientes c ON p.cliente_id = c.id
+                         LEFT JOIN escolas e ON p.escola_id = e.id
+                         ORDER BY p.criado_em DESC''')
+        else:
+            c = conn.cursor()
+            c.execute('''SELECT p.*, c.nome as cliente_nome, e.nome as escola_nome 
+                         FROM pedidos p
+                         LEFT JOIN clientes c ON p.cliente_id = c.id
+                         LEFT JOIN escolas e ON p.escola_id = e.id
+                         ORDER BY p.criado_em DESC''')
+        
+        pedidos = c.fetchall()
+        return pedidos
+    except Exception as e:
+        st.error(f"Erro ao buscar pedidos: {e}")
+        return []
+    finally:
+        conn.close()
 
 def update_pedido_status(pedido_id, novo_status):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("UPDATE pedidos SET status = ? WHERE id = ?", (novo_status, pedido_id))
-    conn.commit()
-    conn.close()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("UPDATE pedidos SET status = %s WHERE id = %s", (novo_status, pedido_id))
+        else:
+            c = conn.cursor()
+            c.execute("UPDATE pedidos SET status = ? WHERE id = ?", (novo_status, pedido_id))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao atualizar status: {e}")
+        return False
+    finally:
+        conn.close()
 
 # Funções de Gestão de Usuários
 def add_usuario(username, password, nivel):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
     try:
         senha_hash = hash_password(password)
-        c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (?, ?, ?)",
-                 (username, senha_hash, nivel))
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (%s, %s, %s)",
+                     (username, senha_hash, nivel))
+        else:
+            c = conn.cursor()
+            c.execute("INSERT INTO usuarios (username, password, nivel) VALUES (?, ?, ?)",
+                     (username, senha_hash, nivel))
+        
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
+    except Exception as e:
+        conn.rollback()
+        st.error(f"Erro ao criar usuário: {e}")
         return False
     finally:
         conn.close()
 
 def get_usuarios():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("SELECT id, username, nivel, criado_em FROM usuarios ORDER BY username")
-    usuarios = c.fetchall()
-    conn.close()
-    return usuarios
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute("SELECT id, username, nivel, criado_em FROM usuarios ORDER BY username")
+        else:
+            c = conn.cursor()
+            c.execute("SELECT id, username, nivel, criado_em FROM usuarios ORDER BY username")
+        
+        usuarios = c.fetchall()
+        return usuarios
+    except Exception as e:
+        st.error(f"Erro ao buscar usuários: {e}")
+        return []
+    finally:
+        conn.close()
 
-def delete_usuario(usuario_id):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
-    conn.commit()
-    conn.close()
-
-def update_usuario_password(usuario_id, nova_senha):
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    nova_senha_hash = hash_password(nova_senha)
-    c.execute("UPDATE usuarios SET password=? WHERE id=?", (nova_senha_hash, usuario_id))
-    conn.commit()
-    conn.close()
-
-# Sistema de IA - Previsões baseadas em dados reais
+# Sistema de IA
 def previsao_vendas():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    
-    # Buscar dados históricos dos últimos 6 meses
-    c.execute('''SELECT strftime('%Y-%m', criado_em) as mes, SUM(total) as total_mes
-                 FROM pedidos 
-                 WHERE criado_em >= date('now', '-6 months')
-                 GROUP BY mes
-                 ORDER BY mes''')
-    dados_historicos = c.fetchall()
-    
-    conn.close()
-    
-    if dados_historicos:
-        # Calcular previsão baseada na média com crescimento de 10%
-        ultimo_mes = dados_historicos[-1][1]
-        previsao_base = ultimo_mes * 1.1  # 10% de crescimento
-        
-        meses = ['Próximo Mês', '2° Mês', '3° Mês', '4° Mês', '5° Mês', '6° Mês']
-        previsoes = [previsao_base * (1 + 0.1 * i) for i in range(6)]
-        
-        return meses, previsoes
-    else:
-        # Dados simulados caso não haja histórico
-        meses = ['Próximo Mês', '2° Mês', '3° Mês', '4° Mês', '5° Mês', '6° Mês']
-        previsoes = [12000, 15000, 18000, 22000, 25000, 29000]
-        return meses, previsoes
+    # Simulação de previsão
+    meses = ['Próximo Mês', '2° Mês', '3° Mês', '4° Mês', '5° Mês', '6° Mês']
+    vendas = [12000, 15000, 18000, 22000, 25000, 29000]
+    return meses, vendas
 
 def alertas_estoque():
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute('''SELECT e.escola_id, esc.nome as escola_nome, p.nome as produto_nome, 
-                        e.quantidade, p.estoque_minimo
-                 FROM estoque_escolas e
-                 JOIN produtos p ON e.produto_id = p.id
-                 JOIN escolas esc ON e.escola_id = esc.id
-                 WHERE e.quantidade <= p.estoque_minimo''')
-    alertas = c.fetchall()
-    conn.close()
-    return alertas
-
-# Funções para resetar dados
-def resetar_dados_ai():
-    """Remove apenas dados de pedidos para resetar as previsões da AI"""
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM itens_pedido")
-    c.execute("DELETE FROM pedidos")
-    conn.commit()
-    conn.close()
-
-def resetar_dados_completos():
-    """Remove todos os dados exceto usuários"""
-    conn = sqlite3.connect('gestao.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM itens_pedido")
-    c.execute("DELETE FROM pedidos")
-    c.execute("DELETE FROM estoque_escolas")
-    c.execute("DELETE FROM clientes")
-    c.execute("DELETE FROM escolas")
-    c.execute("DELETE FROM produtos")
-    conn.commit()
-    conn.close()
+    conn = get_db_connection()
+    is_postgres = 'psycopg2' in str(type(conn))
+    
+    try:
+        if is_postgres:
+            c = conn.cursor()
+            c.execute('''SELECT e.escola_id, esc.nome as escola_nome, p.nome as produto_nome, p.tamanho,
+                                e.quantidade, p.estoque_minimo
+                         FROM estoque_escolas e
+                         JOIN produtos p ON e.produto_id = p.id
+                         JOIN escolas esc ON e.escola_id = esc.id
+                         WHERE e.quantidade <= p.estoque_minimo''')
+        else:
+            c = conn.cursor()
+            c.execute('''SELECT e.escola_id, esc.nome as escola_nome, p.nome as produto_nome, p.tamanho,
+                                e.quantidade, p.estoque_minimo
+                         FROM estoque_escolas e
+                         JOIN produtos p ON e.produto_id = p.id
+                         JOIN escolas esc ON e.escola_id = esc.id
+                         WHERE e.quantidade <= p.estoque_minimo''')
+        
+        alertas = c.fetchall()
+        return alertas
+    except Exception as e:
+        st.error(f"Erro ao buscar alertas: {e}")
+        return []
+    finally:
+        conn.close()
 
 # Interface Principal
 def main():
@@ -475,7 +725,7 @@ def show_main_app():
     st.sidebar.write(f"**Nível:** {st.session_state.user[3]}")
     st.sidebar.write(f"**Data:** {format_date_br(get_brasil_datetime())}")
     
-    # Menu lateral baseado no nível de usuário
+    # Menu lateral
     menu_options = ["📊 Dashboard", "👥 Gestão de Clientes", "🏫 Gestão de Escolas", 
                    "📦 Gestão de Produtos", "📦 Sistema de Pedidos", "📈 Relatórios", "🤖 Sistema A.I."]
     
@@ -527,33 +777,11 @@ def show_dashboard():
     with col4:
         total_vendas = sum(pedido[4] for pedido in pedidos)
         st.metric("Faturamento Total", f"R$ {total_vendas:,.2f}")
-    
-    # Gráficos simplificados sem Plotly
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Previsão de Vendas")
-        meses, vendas = previsao_vendas()
-        
-        for i, (mes, venda) in enumerate(zip(meses, vendas)):
-            st.write(f"**{mes}:** R$ {venda:,.2f}")
-            st.progress(min(venda / 30000, 1.0))
-    
-    with col2:
-        st.subheader("Status dos Pedidos")
-        pedidos = get_pedidos()
-        status_count = {}
-        for pedido in pedidos:
-            status = pedido[3]
-            status_count[status] = status_count.get(status, 0) + 1
-        
-        for status, count in status_count.items():
-            st.write(f"**{status}:** {count} pedidos")
 
 def show_client_management():
     st.title("👥 Gestão de Clientes")
     
-    tab1, tab2, tab3 = st.tabs(["Cadastrar Cliente", "Lista de Clientes", "Buscar/Editar"])
+    tab1, tab2 = st.tabs(["Cadastrar Cliente", "Lista de Clientes"])
     
     with tab1:
         st.subheader("Novo Cliente")
@@ -583,34 +811,6 @@ def show_client_management():
                 st.write(f"**Email:** {cliente[3]}")
                 st.write(f"**Endereço:** {cliente[5]}")
                 st.write(f"**Cadastrado em:** {format_date_br(cliente[6])}")
-                
-                if st.button(f"Excluir", key=f"del_{cliente[0]}"):
-                    delete_cliente(cliente[0])
-                    st.rerun()
-    
-    with tab3:
-        st.subheader("Buscar e Editar Clientes")
-        search_term = st.text_input("Buscar por nome ou CPF")
-        
-        clientes = get_clientes()
-        if search_term:
-            clientes_filtrados = [c for c in clientes if search_term.lower() in c[1].lower() or (c[4] and search_term in c[4])]
-        else:
-            clientes_filtrados = clientes
-            
-        for cliente in clientes_filtrados:
-            with st.form(f"edit_{cliente[0]}"):
-                st.write(f"Editando: {cliente[1]}")
-                nome = st.text_input("Nome *", value=cliente[1], key=f"nome_{cliente[0]}")
-                telefone = st.text_input("Telefone", value=cliente[2], key=f"tel_{cliente[0]}")
-                email = st.text_input("Email", value=cliente[3], key=f"email_{cliente[0]}")
-                cpf = st.text_input("CPF", value=cliente[4] or "", key=f"cpf_{cliente[0]}")
-                endereco = st.text_area("Endereço", value=cliente[5], key=f"end_{cliente[0]}")
-                
-                if st.form_submit_button("Atualizar"):
-                    update_cliente(cliente[0], nome, telefone, email, cpf, endereco)
-                    st.success("Cliente atualizado!")
-                    st.rerun()
 
 def show_school_management():
     st.title("🏫 Gestão de Escolas")
@@ -628,8 +828,10 @@ def show_school_management():
             
             if st.form_submit_button("Cadastrar Escola"):
                 if nome:
-                    add_escola(nome, telefone, email, endereco, responsavel)
-                    st.success("Escola cadastrada com sucesso!")
+                    if add_escola(nome, telefone, email, endereco, responsavel):
+                        st.success("Escola cadastrada com sucesso!")
+                    else:
+                        st.error("Erro ao cadastrar escola")
                 else:
                     st.error("Nome da escola é obrigatório")
     
@@ -676,59 +878,64 @@ def show_school_management():
                 for item in estoque:
                     col1, col2, col3 = st.columns([3, 1, 1])
                     with col1:
-                        st.write(f"**{item[1]}**")
-                        st.write(f"Preço: R$ {item[4]:.2f} | Custo: R$ {item[5]:.2f}")
+                        st.write(f"**{item[1]}** - Tamanho: {item[2]}")
                     with col2:
-                        st.write(f"**Estoque:** {item[2]}")
+                        st.write(f"**Estoque:** {item[3]}")
                     with col3:
-                        if item[2] <= item[3]:
-                            st.error(f"⚠️ Mín: {item[3]}")
+                        if item[3] <= item[4]:
+                            st.error(f"⚠️ Mín: {item[4]}")
                         else:
-                            st.success(f"✅ Mín: {item[3]}")
+                            st.success(f"✅ Mín: {item[4]}")
             
             st.markdown("---")
             st.subheader("Ajustar Estoque")
             
             # Formulário para ajustar estoque
             produto_ajuste = st.selectbox("Selecione o Produto", 
-                                         [f"{p[0]} - {p[1]}" for p in produtos])
-            quantidade_atual = 0
+                                         [f"{p[0]} - {p[1]} ({p[6]})" for p in produtos])
             
             if produto_ajuste:
                 produto_id = int(produto_ajuste.split(' - ')[0])
-                quantidade_atual = get_estoque_produto_escola(escola_id, produto_id)
                 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"Estoque atual: **{quantidade_atual}**")
-                with col2:
-                    nova_quantidade = st.number_input("Nova quantidade", 
-                                                     min_value=0, 
-                                                     value=quantidade_atual,
-                                                     key=f"ajuste_{produto_id}")
+                # Buscar quantidade atual
+                estoque_atual = 0
+                for item in estoque:
+                    if item[7] == produto_id:
+                        estoque_atual = item[3]
+                        break
+                
+                nova_quantidade = st.number_input("Nova quantidade", 
+                                                 min_value=0, 
+                                                 value=estoque_atual,
+                                                 key=f"ajuste_{produto_id}")
                 
                 if st.button("Atualizar Estoque", key=f"btn_ajuste_{produto_id}"):
-                    update_estoque_escola(escola_id, produto_id, nova_quantidade)
-                    st.success(f"Estoque de {produto_ajuste.split(' - ')[1]} atualizado para {nova_quantidade}!")
-                    st.rerun()
+                    if update_estoque_escola(escola_id, produto_id, nova_quantidade):
+                        st.success(f"Estoque atualizado para {nova_quantidade}!")
+                        st.rerun()
 
 def show_product_management():
     st.title("📦 Gestão de Produtos")
     
-    tab1, tab2, tab3 = st.tabs(["Cadastrar Produto", "Lista de Produtos", "Editar Produtos"])
+    tab1, tab2 = st.tabs(["Cadastrar Produto", "Lista de Produtos"])
     
     with tab1:
         st.subheader("Novo Produto")
         with st.form("novo_produto"):
             nome = st.text_input("Nome do Produto *")
             descricao = st.text_area("Descrição")
-            col1, col2, col3 = st.columns(3)
+            
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 preco = st.number_input("Preço de Venda (R$)", min_value=0.0, value=0.0, step=0.01)
             with col2:
                 custo = st.number_input("Custo (R$)", min_value=0.0, value=0.0, step=0.01)
             with col3:
                 estoque_minimo = st.number_input("Estoque Mínimo", min_value=0, value=5)
+            with col4:
+                # Tamanhos padronizados
+                tamanhos = ["", "PP", "P", "M", "G", "GG", "EXG", "2", "4", "6", "8", "10", "12", "Único"]
+                tamanho = st.selectbox("Tamanho *", tamanhos)
             
             # Opção para vincular automaticamente às escolas
             escolas = get_escolas()
@@ -741,28 +948,33 @@ def show_product_management():
                 estoque_inicial = 0
             
             if st.form_submit_button("Cadastrar Produto"):
-                if nome and preco > 0:
-                    produto_id = add_produto(nome, descricao, preco, custo, estoque_minimo)
-                    st.success("Produto cadastrado com sucesso!")
+                if nome and preco > 0 and tamanho:
+                    sucesso, resultado = add_produto(nome, descricao, preco, custo, estoque_minimo, tamanho)
                     
-                    # Vincular automaticamente às escolas
-                    if vincular_escolas and escolas:
-                        vincular_produto_todas_escolas(produto_id, estoque_inicial)
-                        st.success(f"Produto vinculado automaticamente a {len(escolas)} escolas com estoque inicial de {estoque_inicial} unidades")
-                    
-                    # Calcular margem automática
-                    if preco > 0 and custo > 0:
-                        margem = ((preco - custo) / preco) * 100
-                        st.info(f"Margem de lucro: {margem:.1f}%")
+                    if sucesso:
+                        st.success("Produto cadastrado com sucesso!")
+                        
+                        # Vincular automaticamente às escolas
+                        if vincular_escolas and escolas:
+                            produto_id = resultado
+                            if vincular_produto_todas_escolas(produto_id, estoque_inicial):
+                                st.success(f"Produto vinculado automaticamente a {len(escolas)} escolas!")
+                        
+                        # Calcular margem
+                        if preco > 0 and custo > 0:
+                            margem = ((preco - custo) / preco) * 100
+                            st.info(f"Margem de lucro: {margem:.1f}%")
+                    else:
+                        st.error(resultado)
                 else:
-                    st.error("Nome e preço são obrigatórios")
+                    st.error("Nome, preço e tamanho são obrigatórios")
     
     with tab2:
         st.subheader("Lista de Produtos")
         produtos = get_produtos()
         
         for produto in produtos:
-            with st.expander(f"{produto[1]} - R$ {produto[3]:.2f}"):
+            with st.expander(f"{produto[1]} - Tamanho: {produto[6]} - R$ {produto[3]:.2f}"):
                 st.write(f"**Descrição:** {produto[2]}")
                 st.write(f"**Preço:** R$ {produto[3]:.2f}")
                 st.write(f"**Custo:** R$ {produto[4]:.2f}")
@@ -774,45 +986,6 @@ def show_product_management():
                     lucro_unitario = produto[3] - produto[4]
                     st.write(f"**Margem:** {margem:.1f}%")
                     st.write(f"**Lucro Unitário:** R$ {lucro_unitario:.2f}")
-                
-                # Mostrar estoque total por escola
-                st.write("**Estoque por Escola:**")
-                escolas = get_escolas()
-                tem_estoque = False
-                for escola in escolas:
-                    estoque = get_estoque_produto_escola(escola[0], produto[0])
-                    if estoque > 0:
-                        st.write(f"- {escola[1]}: {estoque} unidades")
-                        tem_estoque = True
-                
-                if not tem_estoque:
-                    st.write("Nenhum estoque em nenhuma escola")
-                
-                if st.button(f"Excluir", key=f"del_prod_{produto[0]}"):
-                    delete_produto(produto[0])
-                    st.rerun()
-    
-    with tab3:
-        st.subheader("Editar Produtos")
-        produtos = get_produtos()
-        
-        for produto in produtos:
-            with st.form(f"edit_prod_{produto[0]}"):
-                st.write(f"Editando: {produto[1]}")
-                nome = st.text_input("Nome", value=produto[1], key=f"prod_nome_{produto[0]}")
-                descricao = st.text_area("Descrição", value=produto[2], key=f"prod_desc_{produto[0]}")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    preco = st.number_input("Preço", value=float(produto[3]), key=f"prod_preco_{produto[0]}")
-                with col2:
-                    custo = st.number_input("Custo", value=float(produto[4]), key=f"prod_custo_{produto[0]}")
-                with col3:
-                    estoque_minimo = st.number_input("Estoque Mínimo", value=produto[5], key=f"prod_est_min_{produto[0]}")
-                
-                if st.form_submit_button("Atualizar"):
-                    update_produto(produto[0], nome, descricao, preco, custo, estoque_minimo)
-                    st.success("Produto atualizado!")
-                    st.rerun()
 
 def show_order_management():
     st.title("📦 Sistema de Pedidos")
@@ -851,21 +1024,28 @@ def show_order_management():
             st.subheader("Itens do Pedido")
             
             itens = []
-            escola_id = int(escola_selecionada.split(' - ')[0]) if escola_selecionada else None
+            if escola_selecionada:
+                escola_id = int(escola_selecionada.split(' - ')[0])
+                estoque_escola = get_estoque_escola(escola_id)
             
-            # Mostrar apenas produtos com estoque na escola selecionada
-            produtos_com_estoque = []
-            for produto in produtos:
-                if escola_id:
-                    estoque = get_estoque_produto_escola(escola_id, produto[0])
-                    if estoque > 0:
-                        produtos_com_estoque.append(produto)
-            
-            for i in range(3):  # Permite até 3 itens
+            for i in range(3):
                 col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
                 with col1:
+                    # Mostrar apenas produtos com estoque
+                    produtos_com_estoque = []
+                    for produto in produtos:
+                        estoque_disponivel = 0
+                        for item in estoque_escola:
+                            if item[7] == produto[0]:
+                                estoque_disponivel = item[3]
+                                break
+                        
+                        if estoque_disponivel > 0:
+                            produtos_com_estoque.append(produto)
+                    
                     if produtos_com_estoque:
-                        produto_opcoes = [f"{p[0]} - {p[1]} (Estoque: {get_estoque_produto_escola(escola_id, p[0])})" for p in produtos_com_estoque]
+                        produto_opcoes = [f"{p[0]} - {p[1]} ({p[6]}) - Estoque: {next((item[3] for item in estoque_escola if item[7] == p[0]), 0)}" 
+                                         for p in produtos_com_estoque]
                         produto_selecionado = st.selectbox(f"Produto {i+1}", [""] + produto_opcoes, key=f"prod_{i}")
                     else:
                         st.warning("Nenhum produto com estoque")
@@ -874,7 +1054,7 @@ def show_order_management():
                 with col2:
                     if produto_selecionado:
                         produto_id = int(produto_selecionado.split(' - ')[0])
-                        estoque_disponivel = get_estoque_produto_escola(escola_id, produto_id)
+                        estoque_disponivel = next((item[3] for item in estoque_escola if item[7] == produto_id), 0)
                         quantidade = st.number_input(f"Qtd {i+1}", min_value=1, max_value=estoque_disponivel, value=1, key=f"qtd_{i}")
                     else:
                         quantidade = 0
@@ -922,50 +1102,26 @@ def show_order_management():
                     st.metric("Margem", f"{margem_lucro:.1f}%")
             
             if st.form_submit_button("Criar Pedido"):
-                if not cliente_selecionado or not escola_selecionada:
-                    st.error("Selecione cliente e escola")
-                elif not itens:
+                if not itens:
                     st.error("Adicione pelo menos um item ao pedido")
                 else:
                     cliente_id = int(cliente_selecionado.split(' - ')[0])
                     escola_id = int(escola_selecionada.split(' - ')[0])
                     
                     pedido_id = add_pedido(cliente_id, escola_id, itens, desconto)
-                    st.success(f"Pedido #{pedido_id} criado com sucesso!")
-                    
-                    # Mostrar resumo final
-                    st.info(f"""
-                    **Resumo do Pedido #{pedido_id}:**
-                    - Total: R$ {total_com_desconto:.2f}
-                    - Desconto: {desconto}%
-                    - Custo Total: R$ {total_custo:.2f}
-                    - Lucro: R$ {lucro_total:.2f}
-                    - Margem: {margem_lucro:.1f}%
-                    """)
+                    if pedido_id:
+                        st.success(f"Pedido #{pedido_id} criado com sucesso!")
     
     with tab2:
         st.subheader("Histórico de Pedidos")
         pedidos = get_pedidos()
         
-        # Filtros
-        col1, col2 = st.columns(2)
-        with col1:
-            status_filter = st.selectbox("Filtrar por status", ["Todos", "Pendente", "Confirmado", "Enviado", "Entregue", "Cancelado"])
-        with col2:
-            search_pedido = st.text_input("Buscar por ID ou cliente")
-        
         for pedido in pedidos:
-            # Aplicar filtros
-            if status_filter != "Todos" and pedido[3] != status_filter:
-                continue
-            if search_pedido and (search_pedido not in str(pedido[0]) and search_pedido.lower() not in pedido[6].lower()):
-                continue
-                
-            with st.expander(f"Pedido #{pedido[0]} - {pedido[6]} - R$ {pedido[4]:.2f} - {pedido[3]}"):
+            with st.expander(f"Pedido #{pedido[0]} - {pedido[10]} - R$ {pedido[4]:.2f} - {pedido[3]}"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write(f"**Cliente:** {pedido[6]}")
-                    st.write(f"**Escola:** {pedido[7]}")
+                    st.write(f"**Cliente:** {pedido[10]}")
+                    st.write(f"**Escola:** {pedido[11]}")
                     st.write(f"**Status:** {pedido[3]}")
                     st.write(f"**Data:** {format_date_br(pedido[9])}")
                 with col2:
@@ -995,12 +1151,10 @@ def show_order_management():
                         update_pedido_status(pedido[0], "Cancelado")
                         st.rerun()
 
-# ... (o restante do código permanece igual - reports, ai_system, admin_panel)
-
 def show_reports():
     st.title("📈 Relatórios e Análises")
     
-    tab1, tab2, tab3 = st.tabs(["Exportar Dados", "Análise Financeira", "Relatório de Estoque"])
+    tab1, tab2 = st.tabs(["Exportar Dados", "Análise Financeira"])
     
     with tab1:
         st.subheader("Exportar Dados")
@@ -1013,7 +1167,8 @@ def show_reports():
                 output = StringIO()
                 writer = csv.writer(output)
                 writer.writerow(['ID', 'Nome', 'Telefone', 'Email', 'CPF', 'Endereço', 'Data_Criacao'])
-                writer.writerows(clientes)
+                for cliente in clientes:
+                    writer.writerow(cliente)
                 st.download_button("Baixar CSV", output.getvalue(), "clientes.csv", "text/csv")
         
         with col2:
@@ -1022,7 +1177,8 @@ def show_reports():
                 output = StringIO()
                 writer = csv.writer(output)
                 writer.writerow(['ID', 'Cliente_ID', 'Escola_ID', 'Status', 'Total', 'Desconto', 'Custo_Total', 'Lucro_Total', 'Margem_Lucro', 'Data', 'Cliente_Nome', 'Escola_Nome'])
-                writer.writerows(pedidos)
+                for pedido in pedidos:
+                    writer.writerow(pedido)
                 st.download_button("Baixar CSV", output.getvalue(), "pedidos.csv", "text/csv")
         
         with col3:
@@ -1030,60 +1186,15 @@ def show_reports():
                 produtos = get_produtos()
                 output = StringIO()
                 writer = csv.writer(output)
-                writer.writerow(['ID', 'Nome', 'Descricao', 'Preco', 'Custo', 'Estoque_Minimo', 'Data_Criacao'])
-                writer.writerows(produtos)
+                writer.writerow(['ID', 'Nome', 'Descricao', 'Preco', 'Custo', 'Estoque_Minimo', 'Tamanho', 'Data_Criacao'])
+                for produto in produtos:
+                    writer.writerow(produto)
                 st.download_button("Baixar CSV", output.getvalue(), "produtos.csv", "text/csv")
-    
-    with tab2:
-        st.subheader("Análise Financeira")
-        pedidos = get_pedidos()
-        
-        if pedidos:
-            total_vendas = sum(pedido[4] for pedido in pedidos)
-            total_custo = sum(pedido[6] for pedido in pedidos)
-            total_lucro = sum(pedido[7] for pedido in pedidos)
-            margem_media = (total_lucro / total_vendas * 100) if total_vendas > 0 else 0
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total de Vendas", f"R$ {total_vendas:,.2f}")
-            with col2:
-                st.metric("Total de Custos", f"R$ {total_custo:,.2f}")
-            with col3:
-                st.metric("Lucro Total", f"R$ {total_lucro:,.2f}")
-            with col4:
-                st.metric("Margem Média", f"{margem_media:.1f}%")
-            
-            # Vendas por status
-            st.subheader("Vendas por Status")
-            status_vendas = {}
-            for pedido in pedidos:
-                status = pedido[3]
-                status_vendas[status] = status_vendas.get(status, 0) + pedido[4]
-            
-            for status, total in status_vendas.items():
-                st.write(f"**{status}:** R$ {total:,.2f}")
-        else:
-            st.info("Nenhum pedido encontrado para análise")
-    
-    with tab3:
-        st.subheader("Relatório de Estoque")
-        escolas = get_escolas()
-        
-        for escola in escolas:
-            with st.expander(f"Estoque - {escola[1]}"):
-                estoque = get_estoque_escola(escola[0])
-                if estoque:
-                    for item in estoque:
-                        status = "✅ Suficiente" if item[2] > item[3] else "⚠️ Baixo"
-                        st.write(f"**{item[1]}**: {item[2]} unidades ({status})")
-                else:
-                    st.info("Nenhum produto em estoque")
 
 def show_ai_system():
     st.title("🤖 Sistema A.I. Inteligente")
     
-    tab1, tab2, tab3 = st.tabs(["📈 Previsões de Vendas", "⚠️ Alertas Automáticos", "🔄 Gerenciar Dados"])
+    tab1, tab2 = st.tabs(["📈 Previsões de Vendas", "⚠️ Alertas Automáticos"])
     
     with tab1:
         st.subheader("Previsões de Vendas")
@@ -1093,34 +1204,9 @@ def show_ai_system():
         for mes, venda in zip(meses, vendas):
             st.write(f"- **{mes}:** R$ {venda:,.2f}")
             st.progress(min(venda / 50000, 1.0))
-        
-        # Análise de tendências
-        st.subheader("Análise de Tendências")
-        
-        pedidos = get_pedidos()
-        if pedidos:
-            # Calcular crescimento real
-            vendas_por_mes = {}
-            for pedido in pedidos:
-                data = datetime.strptime(pedido[9], '%Y-%m-%d %H:%M:%S')
-                mes_ano = data.strftime('%Y-%m')
-                vendas_por_mes[mes_ano] = vendas_por_mes.get(mes_ano, 0) + pedido[4]
-            
-            if len(vendas_por_mes) > 1:
-                meses_ordenados = sorted(vendas_por_mes.keys())
-                crescimento = ((vendas_por_mes[meses_ordenados[-1]] - vendas_por_mes[meses_ordenados[0]]) / vendas_por_mes[meses_ordenados[0]]) * 100
-                st.info(f"**Crescimento real:** {crescimento:.1f}% nos últimos {len(meses_ordenados)} meses")
-        
-        st.info("""
-        **Insights da IA:**
-        - Baseado em dados históricos de vendas
-        - Considera tendência de crescimento de 10% ao mês
-        - Ajusta automaticamente conforme novos pedidos são cadastrados
-        - Recomendação: Aumentar estoque em 15% para atender à demanda prevista
-        """)
     
     with tab2:
-        st.subheader("Alertas Automáticos")
+        st.subheader("Alertas de Estoque")
         alertas = alertas_estoque()
         
         if alertas:
@@ -1128,59 +1214,12 @@ def show_ai_system():
                 st.error(f"""
                 ⚠️ **ALERTA DE ESTOQUE BAIXO**
                 - Escola: {alerta[1]}
-                - Produto: {alerta[2]}
-                - Estoque atual: {alerta[3]}
-                - Mínimo recomendado: {alerta[4]}
+                - Produto: {alerta[2]} - Tamanho: {alerta[3]}
+                - Estoque atual: {alerta[4]}
+                - Mínimo recomendado: {alerta[5]}
                 """)
         else:
             st.success("✅ Nenhum alerta de estoque baixo no momento")
-        
-        # Alertas de produtos sem estoque
-        st.subheader("Produtos Sem Estoque")
-        produtos = get_produtos()
-        escolas = get_escolas()
-        
-        produtos_sem_estoque = []
-        for produto in produtos:
-            tem_estoque = False
-            for escola in escolas:
-                estoque = get_estoque_produto_escola(escola[0], produto[0])
-                if estoque > 0:
-                    tem_estoque = True
-                    break
-            
-            if not tem_estoque:
-                produtos_sem_estoque.append(produto)
-        
-        if produtos_sem_estoque:
-            for produto in produtos_sem_estoque:
-                st.warning(f"📦 **{produto[1]}** - Nenhum estoque em nenhuma escola")
-        else:
-            st.success("✅ Todos os produtos têm estoque em pelo menos uma escola")
-    
-    with tab3:
-        st.subheader("Gerenciar Dados da A.I.")
-        
-        st.warning("""
-        **Atenção:** 
-        - Resetar dados da A.I. apagará todos os pedidos para recalcular previsões
-        - Reset completo apagará todos os dados exceto usuários
-        - Estas ações não podem ser desfeitas
-        """)
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("🔄 Resetar Dados da A.I. (Pedidos)", type="secondary"):
-                resetar_dados_ai()
-                st.success("Dados da A.I. resetados com sucesso!")
-                st.info("As previsões agora serão baseadas em dados novos")
-        
-        with col2:
-            if st.button("🗑️ Resetar Todos os Dados", type="primary"):
-                resetar_dados_completos()
-                st.success("Todos os dados foram resetados!")
-                st.info("Sistema pronto para começar do zero")
 
 def show_admin_panel():
     if st.session_state.user[3] != 'admin':
@@ -1189,12 +1228,11 @@ def show_admin_panel():
         
     st.title("🔐 Painel de Administração")
     
-    tab1, tab2, tab3 = st.tabs(["Gerenciar Usuários", "Backup de Dados", "Alterar Minha Senha"])
+    tab1, tab2 = st.tabs(["Gerenciar Usuários", "Backup de Dados"])
     
     with tab1:
         st.subheader("Gerenciar Usuários")
         
-        # Adicionar novo usuário
         with st.form("novo_usuario"):
             st.write("**Adicionar Novo Usuário**")
             col1, col2, col3 = st.columns(3)
@@ -1211,11 +1249,10 @@ def show_admin_panel():
                     if add_usuario(username, password, nivel):
                         st.success(f"Usuário {username} criado com sucesso!")
                     else:
-                        st.error("Erro: Nome de usuário já existe")
+                        st.error("Erro ao criar usuário")
                 else:
                     st.error("Nome de usuário e senha são obrigatórios")
         
-        # Listar usuários existentes
         st.subheader("Usuários do Sistema")
         usuarios = get_usuarios()
         
@@ -1224,59 +1261,6 @@ def show_admin_panel():
                 st.write(f"ID: {usuario[0]}")
                 st.write(f"Nível: {usuario[2]}")
                 st.write(f"Criado em: {format_date_br(usuario[3])}")
-                
-                if usuario[1] != "admin":  # Não permite excluir o admin principal
-                    if st.button(f"Excluir Usuário", key=f"del_user_{usuario[0]}"):
-                        delete_usuario(usuario[0])
-                        st.success("Usuário excluído!")
-                        st.rerun()
-                else:
-                    st.info("Usuário admin principal - não pode ser excluído")
-    
-    with tab2:
-        st.subheader("Backup de Dados")
-        
-        if st.button("Gerar Backup Completo"):
-            # Criar backup de todas as tabelas
-            conn = sqlite3.connect('gestao.db')
-            backup_data = {}
-            
-            tables = ['usuarios', 'clientes', 'escolas', 'produtos', 'estoque_escolas', 'pedidos', 'itens_pedido']
-            for table in tables:
-                c = conn.cursor()
-                c.execute(f"SELECT * FROM {table}")
-                backup_data[table] = c.fetchall()
-            
-            conn.close()
-            
-            # Salvar como JSON
-            backup_json = json.dumps(backup_data, indent=2, default=str)
-            st.download_button(
-                "📥 Baixar Backup", 
-                backup_json, 
-                f"backup_sistema_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                "application/json"
-            )
-            st.success("Backup gerado com sucesso!")
-    
-    with tab3:
-        st.subheader("Alterar Minha Senha")
-        
-        with st.form("alterar_senha"):
-            senha_atual = st.text_input("Senha Atual", type="password")
-            nova_senha = st.text_input("Nova Senha", type="password")
-            confirmar_senha = st.text_input("Confirmar Nova Senha", type="password")
-            
-            if st.form_submit_button("Alterar Senha"):
-                if nova_senha == confirmar_senha:
-                    # Verificar senha atual
-                    if verify_login(st.session_state.user[1], senha_atual):
-                        update_usuario_password(st.session_state.user[0], nova_senha)
-                        st.success("Senha alterada com sucesso!")
-                    else:
-                        st.error("Senha atual incorreta")
-                else:
-                    st.error("As novas senhas não coincidem")
 
 if __name__ == "__main__":
     main()
